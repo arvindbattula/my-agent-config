@@ -27,6 +27,7 @@ cd my-agent-config
 | `remove-dead-code` | Find and remove unused files, deps, exports via knip |
 | `find-skills` | Discover and install skills from the ecosystem |
 | `skill-creator` | Guide for building new skills |
+| `triage-issue` | Investigate bugs, find root cause, create issue with TDD fix plan |
 | `electron-wrapper` | Wrap a web app into an Electron desktop app |
 
 ### Commands (user-invoked via `/`)
@@ -36,6 +37,8 @@ cd my-agent-config
 | `/cleanup-ai-slop` | Remove AI-generated cruft from the current branch |
 | `/code-simplify` | Simplify recently changed code for clarity |
 | `/organize-claude-config` | Refactor CLAUDE.md for progressive disclosure |
+| `/grill-me` | Relentlessly interview you about a plan until all decisions are resolved |
+| `/review-architecture` | Find architectural improvements by deepening shallow modules |
 | `/sync` | Compare repo vs local config and resolve differences |
 
 ### Rules (always-on)
@@ -65,4 +68,4 @@ All overwrites create timestamped backups in `~/.claude/backups/`.
 
 ## Origin
 
-Skills originally ported from [brianlovin/agent-config](https://github.com/brianlovin/agent-config), renamed for clarity, reorganized into skills vs commands, and extended with custom rules.
+Skills originally ported from [brianlovin/agent-config](https://github.com/brianlovin/agent-config) and [mattpocock/skills](https://github.com/mattpocock/skills), renamed for clarity, reorganized into skills vs commands, and extended with custom rules.

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # Resolve repo directory from script location
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
