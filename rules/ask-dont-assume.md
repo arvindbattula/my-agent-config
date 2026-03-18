@@ -1,0 +1,1 @@
+When a task is ambiguous or has multiple valid approaches, ask before building. Don't guess at requirements. For minor decisions that are easily reversible, use your best judgment and mention what you chose.

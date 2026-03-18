@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(gh:*)",
+      "Bash(git:*)",
+      "Bash(python:*)",
+      "Bash(pip:*)"
+    ]
+  },
+  "alwaysThinkingEnabled": true,
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  },
+  "enabledPlugins": {
+    "document-skills@anthropic-agent-skills": true,
+    "ralph-loop@claude-plugins-official": true
+  }
+}
