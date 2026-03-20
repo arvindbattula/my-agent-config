@@ -39,7 +39,6 @@
 | 15 | **Implicit length** | "write a summary" | "Write a summary in exactly 3 sentences" |
 | 16 | **No role assignment** | (blank) | "You are a senior backend engineer specializing in Node.js and PostgreSQL" |
 | 17 | **Vague aesthetic adjectives** | "make it look professional" | "Monochrome palette, 16px base font, 24px line height, no decorative elements" |
-| 18 | **Vague aesthetic adjectives** | "make it look professional" | "Monochrome palette, 16px base font, 24px line height, no decorative elements" |
 
 ---
 
