@@ -28,6 +28,8 @@ cd my-agent-config
 | `find-skills` | Discover and install skills from the ecosystem |
 | `skill-creator` | Guide for building new skills |
 | `triage-issue` | Investigate bugs, find root cause, create issue with TDD fix plan |
+| `prompt-master` | Generate optimized prompts for Claude Code agentic tasks |
+| `visualise` | Render inline interactive visuals — SVG diagrams, HTML widgets, charts |
 | `electron-wrapper` | Wrap a web app into an Electron desktop app |
 
 ### Commands (user-invoked via `/`)
