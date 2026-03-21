@@ -51,6 +51,7 @@ cd my-agent-config
 | `simplicity-over-cleverness` | Simplest solution that works, no over-engineering |
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
 | `minimal-diff` | Only change what's necessary; flag nearby bugs but don't fix unsolicited |
+| `check-docs-first` | Look up current docs for external libraries/APIs before writing code |
 
 ### Config
 - `settings.json` — Permissions, extended thinking, plugins, statusline
