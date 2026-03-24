@@ -33,6 +33,29 @@ cd my-agent-config
 | `electron-wrapper` | Wrap a web app into an Electron desktop app |
 
 ### Commands (user-invoked via `/`)
+
+**Workflow — Structured AI-assisted engineering:**
+
+```
+/scaffold  →  /discover  →  /blueprint  →  /construct  →  /inspect
+                                              ↑              |
+                                              └──────────────┘
+                                           (loop until done)
+```
+
+| Command | Purpose |
+|---------|---------|
+| `/scaffold` | Bootstrap `CLAUDE.md` + `docs/` directory for any new project |
+| `/discover` | Structured product interview (scales by project size) → writes `spec.md` |
+| `/blueprint` | Break spec into phased build plan → writes `plan.md` |
+| `/construct` | Execute one phase at a time with verification and learnings |
+| `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, security) |
+| `/decide` | Log architecture/product decisions with rationale → `decisions.md` |
+
+Use `/decide` anytime during the workflow when a significant choice is made.
+
+**Utility commands:**
+
 | Command | Purpose |
 |---------|---------|
 | `/push-further` | Challenge Claude to find the boldest addition to the current plan |
