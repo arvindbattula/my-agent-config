@@ -81,6 +81,24 @@ After the interview, write `docs/spec.md`. Use this format, but ONLY include sec
 ### Out of Scope
 (what we're explicitly NOT building yet)
 
+## Requirements (EARS format)
+Write each requirement using EARS (Easy Approach to Requirements Syntax) patterns.
+This makes requirements unambiguous and directly testable.
+
+**Patterns:**
+- **Ubiquitous:** The system shall [action]
+- **Event-driven:** When [event], the system shall [action]
+- **State-driven:** While [state], the system shall [action]
+- **Unwanted behavior:** If [condition], then the system shall [action]
+- **Optional:** Where [feature is enabled], the system shall [action]
+
+Example:
+- When the user clicks "Export," the system shall generate a JSON file containing all library entries.
+- If the API returns a 429 status, then the system shall retry after the Retry-After interval.
+- While offline, the system shall queue data sync requests until connectivity is restored.
+
+Group requirements by feature area. Each requirement should be one testable statement.
+
 ## User Flows
 (step-by-step primary flows — skip for quick scripts)
 

@@ -15,6 +15,16 @@ Read these files before starting:
 
 If `docs/plan.md` is empty or only has the placeholder comment, stop and tell the user to run `/blueprint` first.
 
+## Context Window Management
+
+**Check the statusline before starting.** The context percentage in the status bar tells you how much room is left for reasoning.
+
+- **Under 40%:** Good — plenty of room. Proceed normally.
+- **40-60%:** Caution zone. Complete the current phase but don't start another in this session. After finishing, suggest: "Context is getting heavy. Start a fresh session for the next phase — your spec, plan, and learnings will carry over."
+- **Over 60%:** If you haven't started building yet, tell the user: "Context is too full to build well in this session. Start a fresh `/construct` session — all project context is in the docs/ files." If you're mid-build, finish the current task but skip non-essential work.
+
+**Why this matters:** Claude's reasoning quality degrades as context fills up. The whole point of persisting everything to `docs/` files is that you can start fresh sessions without losing anything. A clean session with 5% context reading spec + plan will produce better code than a bloated session at 70%.
+
 ## Process
 
 ### Step 1: Identify the phase
