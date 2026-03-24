@@ -2,6 +2,10 @@ Structured product discovery interview. Guides the user from a fuzzy idea to a c
 
 **This is NOT the same as /grill-me.** Grill-me is general-purpose questioning. Discover is a structured product definition process with layered interview phases and a persisted spec output.
 
+## Before Starting
+
+Read `~/.claude/memory/discovery-blind-spots.md` if it exists. This file contains patterns of things missed in past projects. Use these to add targeted probing questions during the interview — weave them into the relevant layer naturally, don't dump them as a separate section.
+
 ## Process
 
 ### Step 1: Determine project size

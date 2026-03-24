@@ -37,7 +37,7 @@ cd my-agent-config
 **Workflow — Structured AI-assisted engineering:**
 
 ```
-/scaffold  →  /discover  →  /blueprint  →  /construct  →  /inspect
+/scaffold  →  /discover  →  /blueprint  →  /construct  →  /inspect  →  /retro
                                               ↑              |
                                               └──────────────┘
                                            (loop until done)
@@ -51,8 +51,9 @@ cd my-agent-config
 | `/construct` | Execute one phase at a time with verification and learnings |
 | `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, security) |
 | `/decide` | Log architecture/product decisions with rationale → `decisions.md` |
+| `/retro` | Project retrospective — identifies discovery blind spots, feeds back into `/discover` |
 
-Use `/decide` anytime during the workflow when a significant choice is made.
+Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a project ships — it makes future `/discover` sessions smarter by learning from past misses.
 
 **Utility commands:**
 
