@@ -38,13 +38,25 @@ For each phase, specify:
 **Done when:** (explicit, observable completion criteria)
 ```
 
-### Step 3: Map dependencies
+### Step 3: Cross-phase integration check
+
+Before presenting the plan, stress-test it silently. Ask yourself: **"If I built each phase knowing only its own description and the outputs of prior phases, would the phases fit together?"**
+
+Check for:
+1. Does any phase assume something exists that no prior phase creates?
+2. Are there unstated data format assumptions? (Phase 2 expects JSON, Phase 1 outputs CSV)
+3. Are there naming or interface assumptions? (Phase 3 calls a function Phase 2 should create, but the name/signature isn't specified in either phase)
+4. Does any phase's "Done when" criteria conflict with a later phase's assumptions?
+
+If issues found, fix the plan silently and note what you caught when presenting to the user. If the plan is clean, move on — no announcement needed.
+
+### Step 4: Map dependencies
 
 After the phases, add a dependencies section:
 - Which phases depend on which
 - Which phases could theoretically be done in parallel (useful for Codex later)
 
-### Step 4: User review
+### Step 5: User review
 
 Present the full plan. Ask the user:
 - "Does this order make sense?"
@@ -53,7 +65,7 @@ Present the full plan. Ask the user:
 
 Adjust based on feedback.
 
-### Step 5: Write the plan
+### Step 6: Write the plan
 
 Write the approved plan to `docs/plan.md` using this format:
 
@@ -92,7 +104,7 @@ Date: [today's date]
 - ...
 ```
 
-### Step 6: Suggest next step
+### Step 7: Suggest next step
 
 Tell the user: "Run `/construct` to start building Phase 1."
 

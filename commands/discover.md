@@ -103,6 +103,30 @@ Example:
 
 Group requirements by feature area. Each requirement should be one testable statement.
 
+**For operations (API endpoints, CLI commands, data transformations),** additionally specify inputs, outputs, and failure modes for each requirement:
+
+```
+### [Operation Name]
+[EARS requirement sentence]
+**Accepts:** [input description — types, constraints, optionality]
+**Returns:** [output description]
+**Errors:**
+- [condition] → [behavior]
+```
+
+Example:
+```
+### Add Expense
+When the user runs `add`, the system shall create an expense record and persist it.
+**Accepts:** amount (positive number), category (non-empty string), description (optional string)
+**Returns:** The created expense record with its assigned ID
+**Errors:**
+- Amount is zero or negative → exit with error message and code 1
+- Category is empty → exit with error message and code 1
+```
+
+Use this structured format for operations. Use plain EARS for behavioral/state requirements that don't have clear inputs/outputs.
+
 ## User Flows
 (step-by-step primary flows — skip for quick scripts)
 
@@ -122,11 +146,23 @@ Group requirements by feature area. Each requirement should be one testable stat
 (unresolved items — revisit before or during build)
 ```
 
-### Step 4: Update CLAUDE.md
+### Step 4: Spec self-audit
+
+Before finalizing, re-read the spec adversarially. Check for:
+
+1. **Contradictions** — Does requirement A conflict with requirement B?
+2. **Missing error cases** — Are there operations without failure modes defined?
+3. **Ambiguous terms** — Is the same word used to mean different things? (e.g., "user" = end user vs admin)
+4. **Implicit dependencies** — Does feature A clearly need feature B, but the spec doesn't say so?
+5. **Blocking open questions** — For each item in Open Questions: does it block building, or can we safely defer it?
+
+If issues found, present them to the user with proposed fixes. Update the spec after approval. Keep this lightweight — a quick pass, not a formal report. If the spec is clean, say so and move on.
+
+### Step 5: Update CLAUDE.md
 
 Update the "What This Is" section of `CLAUDE.md` with a 1-2 sentence project summary derived from the spec.
 
-### Step 5: Confirm and suggest next step
+### Step 6: Confirm and suggest next step
 
 Present a summary of the spec to the user. Ask them to review and flag anything wrong.
 

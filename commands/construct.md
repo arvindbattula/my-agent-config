@@ -33,21 +33,40 @@ If `docs/plan.md` is empty or only has the placeholder comment, stop and tell th
 - Otherwise, scan `plan.md` for the first phase with `Status: [ ] Not started` or `Status: [~] In progress`
 - Announce: "Starting Phase N: [Name]" and briefly restate what this phase builds
 
-### Step 2: Review the phase requirements
+### Step 2: Assess current state
+
+Before building, check if this phase has prior work from a previous session:
+
+1. Check which output files mentioned in the **Build** section already exist
+2. If tests exist for this phase, run them to see what passes and what fails
+3. If a **Verify** step exists, run it
+
+Report to the user:
+- If prior work found: "Phase N is partially done — [files] exist, [N/M] tests pass. Resuming from [specific gap]."
+- If no prior work: "Phase N has no prior work. Starting fresh."
+
+This prevents re-doing work lost to session timeouts or context limits.
+
+### Step 3: Review the phase requirements
 
 Re-read the phase's **Build**, **Verify**, **Test**, and **Done when** sections. If anything is ambiguous or conflicts with the spec, ASK the user before proceeding. Do not guess.
 
-### Step 3: Build
+### Step 4: Build
 
 Implement the phase. Follow these principles:
 
 - **Tests alongside code.** If the phase has a Test section, write tests as you go (not all at the end). Use the test-first skill approach when applicable.
 - **Small commits.** If git is set up, commit at natural checkpoints within the phase.
 - **Spec is the source of truth.** If you're tempted to build something not in the spec, stop and ask.
-- **Flag spec gaps.** If you discover the spec is missing something needed for this phase, tell the user. Suggest a spec update. Don't silently fill in gaps.
+- **Reconcile spec gaps — don't work around them.** If you discover the spec is missing something, contradicts itself, or forces a decision not covered, trigger the reconciliation protocol:
+  1. **Stop building.** Name the issue: "Spec says [X] in [section], but implementing it requires [Y] which [contradicts/isn't covered by] [section]."
+  2. **Ask scoped questions.** 2-3 targeted questions to resolve just this gap — not a full re-discovery.
+  3. **Draft a spec amendment.** Write the proposed change to `docs/spec.md`.
+  4. **Quick cross-check.** Re-read related requirements to verify the amendment doesn't break anything else.
+  5. **User approves** → update `docs/spec.md` → log the amendment in `docs/decisions.md` with context → continue building.
 - **Flag decisions.** If you make a non-trivial technical choice (library selection, data structure, API design), note it for the user to potentially record with `/decide`.
 
-### Step 4: Verify
+### Step 5: Verify
 
 Run the verification steps listed in the phase:
 - Execute any tests
@@ -56,7 +75,7 @@ Run the verification steps listed in the phase:
 
 If verification fails, fix the issue. If you can't fix it, explain what's wrong and ask for guidance.
 
-### Step 5: Record learnings
+### Step 6: Record learnings
 
 Append to `docs/learnings.md` anything surprising or useful discovered during this phase:
 - Unexpected behavior from a library or API
@@ -73,18 +92,18 @@ Format:
 
 Don't record obvious things. Only record what would save time or prevent mistakes in a future session.
 
-### Step 6: Update plan status
+### Step 7: Update plan status
 
 In `docs/plan.md`, update the phase status:
 ```markdown
 **Status:** [x] Complete — [Date]
 ```
 
-### Step 7: Update CLAUDE.md
+### Step 8: Update CLAUDE.md
 
 If this phase added build/run/test commands, update the relevant section of `CLAUDE.md`.
 
-### Step 8: Report and suggest next step
+### Step 9: Report and suggest next step
 
 Tell the user:
 - What was built
@@ -99,3 +118,4 @@ Tell the user:
 - **Ask, don't guess.** If the spec doesn't cover something you need to decide, ask.
 - **Verify before done.** Never mark a phase complete without running verification.
 - **Keep context alive.** Everything important goes into learnings.md, decisions.md, or CLAUDE.md — not just conversation context.
+- **Spec reconciliation is not optional.** Don't work around a spec gap with a guess — the spec is the source of truth, and if it's wrong, fix it first. But keep reconciliation lightweight: resolve the specific issue, don't re-open the full discovery.

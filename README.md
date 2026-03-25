@@ -46,9 +46,9 @@ cd my-agent-config
 | Command | Purpose |
 |---------|---------|
 | `/scaffold` | Bootstrap `CLAUDE.md` + `docs/` directory for any new project |
-| `/discover` | Structured product interview (scales by project size) → writes `spec.md` |
-| `/blueprint` | Break spec into phased build plan → writes `plan.md` |
-| `/construct` | Execute one phase at a time with verification and learnings |
+| `/discover` | Structured product interview (scales by project size) → writes `spec.md`. Includes structured `Accepts/Returns/Errors` for operations and a spec self-audit before finalizing. |
+| `/blueprint` | Break spec into phased build plan → writes `plan.md`. Cross-checks phase integration before presenting. |
+| `/construct` | Execute one phase at a time. Resumes partial work from prior sessions. Live spec reconciliation when gaps are found mid-build. |
 | `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, security) |
 | `/decide` | Log architecture/product decisions with rationale → `decisions.md` |
 | `/retro` | Project retrospective — identifies discovery blind spots, feeds back into `/discover` |
