@@ -22,7 +22,7 @@ cd my-agent-config
 ### Skills (auto-triggered by Claude)
 | Skill | Purpose |
 |-------|---------|
-| `task-planner` | Structured planning and execution for complex tasks |
+| `plan-build-verify` | Workflow orchestration — plan, build, and verify complex coding tasks |
 | `test-first` | Test-driven development with red-green-refactor |
 | `remove-dead-code` | Find and remove unused files, deps, exports via knip |
 | `find-skills` | Discover and install skills from the ecosystem |
