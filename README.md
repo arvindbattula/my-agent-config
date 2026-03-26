@@ -22,6 +22,7 @@ cd my-agent-config
 ### Skills (auto-triggered by Claude)
 | Skill | Purpose |
 |-------|---------|
+| `deep-research` | Convergence-driven research — multi-engine search, iterative synthesis, cited briefs |
 | `plan-build-verify` | Workflow orchestration — plan, build, and verify complex coding tasks |
 | `test-first` | Test-driven development with red-green-refactor |
 | `remove-dead-code` | Find and remove unused files, deps, exports via knip |
