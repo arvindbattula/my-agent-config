@@ -73,7 +73,7 @@ Sort by priority (high first), then by frequency.
 
 ### Step 4: Update the memory index
 
-If this is the first retro, add a pointer to `discovery-blind-spots.md` in `~/.claude/projects/-Users-arvindbattula/memory/MEMORY.md`.
+If this is the first retro, add a pointer to `discovery-blind-spots.md` in `~/.claude/memory/MEMORY.md`.
 
 ### Step 5: Report
 
