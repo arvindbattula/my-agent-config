@@ -13,6 +13,23 @@ This command works even without spec/plan files — it will skip the spec-compli
 
 ## Process
 
+### Orientation
+
+Before starting review passes, scope the codebase:
+
+```bash
+# How big is this codebase?
+find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" | grep -v node_modules | wc -l
+
+# Recent changes (what to focus on)
+git log --oneline -10 2>/dev/null
+
+# Any TODOs or FIXMEs left behind?
+grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.py" . 2>/dev/null | grep -v node_modules | head -15
+```
+
+Use this to calibrate review depth — a 5-file project doesn't need the same scrutiny as a 50-file project.
+
 ### Pass 1: Architecture
 
 Explore the codebase and assess:
@@ -103,3 +120,7 @@ Based on findings, suggest:
 - If Fix Now items exist: "Address these before continuing to the next phase."
 - If Fix Later items exist: "Want me to add a cleanup phase to the plan?"
 - If everything looks good: "Codebase is in good shape. Ready for the next `/construct` phase."
+
+## Performance Notes
+<!-- Updated by /retro. Do not edit manually. -->
+<!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->

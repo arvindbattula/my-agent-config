@@ -6,10 +6,25 @@ Read these files before starting:
 - `docs/spec.md` — the specification (required — if missing, tell user to run `/discover` first)
 - `CLAUDE.md` — project context
 - `docs/learnings.md` — any prior learnings
+- `~/.claude/projects/-Users-arvindbattula/memory/engineering_patterns.md` — validated patterns (read if exists, use to inform phase structure)
 
 If `docs/spec.md` is empty or only has the placeholder comment, stop and tell the user to run `/discover` first.
 
 ## Process
+
+### Orientation
+
+Before analyzing the spec, check what already exists:
+
+```bash
+# Does any code already exist? (resuming a project vs. greenfield)
+find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" | grep -v node_modules | head -20
+
+# Is there already a partial plan?
+cat docs/plan.md 2>/dev/null | head -5
+```
+
+If code already exists, the plan should account for what's built vs. what's new.
 
 ### Step 1: Analyze the spec
 
@@ -114,3 +129,7 @@ Tell the user: "Run `/construct` to start building Phase 1."
 - **Name the risks.** If a phase has technical uncertainty, flag it: "This phase depends on [API/library] working as expected. If it doesn't, we may need to revisit."
 - **Respect the spec boundaries.** Don't plan features that are listed as out-of-scope in the spec.
 - **Keep it concrete.** "Build the dashboard" is too vague. "Create index.html with a table showing tab data grouped by topic" is specific enough to build from.
+
+## Performance Notes
+<!-- Updated by /retro. Do not edit manually. -->
+<!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->

@@ -6,6 +6,8 @@ Structured product discovery interview. Guides the user from a fuzzy idea to a c
 
 Read `~/.claude/memory/discovery-blind-spots.md` if it exists. This file contains patterns of things missed in past projects. Use these to add targeted probing questions during the interview — weave them into the relevant layer naturally, don't dump them as a separate section.
 
+Read `~/.claude/projects/-Users-arvindbattula/memory/engineering_patterns.md` if it exists. Use validated patterns to inform technical recommendations during Layer 5 (Technical Shape) — e.g., if a tech choice has been validated across multiple projects, recommend it with confidence.
+
 ## Process
 
 ### Step 1: Determine project size
@@ -176,3 +178,7 @@ Then suggest: "When you're happy with the spec, run `/blueprint` to create the p
 - **Name the unknowns.** If the user says "I'm not sure," that's fine — capture it as an open question in the spec rather than guessing.
 - **Recommend when asked.** If the user wants Claude's opinion on tech choices, give an opinionated recommendation with rationale, not a list of options.
 - **Don't over-spec quick scripts.** A utility script needs 10 lines of spec, not 2 pages.
+
+## Performance Notes
+<!-- Updated by /retro. Do not edit manually. -->
+<!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->

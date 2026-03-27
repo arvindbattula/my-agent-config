@@ -19,6 +19,15 @@ Personal Claude Code configuration — skills, commands, rules, and settings, sy
 - `settings.json` — Permissions, plugins, preferences
 - `statusline.sh` — Terminal status bar (context usage, git info)
 
+## Self-Improving Workflow
+
+The engineering workflow (`/discover` → `/blueprint` → `/construct` → `/inspect` → `/retro`) is self-improving:
+
+- Each skill has a `## Performance Notes` section updated by `/retro`
+- `/retro` extracts both blind spots (what went wrong) and positive patterns (what worked)
+- Patterns validated across 3+ projects get proposed as skill instruction changes
+- Engineering patterns persist in auto-memory and feed back into `/discover` and `/blueprint`
+
 ## Verification
 
 After making changes:

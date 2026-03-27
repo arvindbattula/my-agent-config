@@ -33,6 +33,23 @@ If `docs/plan.md` is empty or only has the placeholder comment, stop and tell th
 - Otherwise, scan `plan.md` for the first phase with `Status: [ ] Not started` or `Status: [~] In progress`
 - Announce: "Starting Phase N: [Name]" and briefly restate what this phase builds
 
+### Step 1b: Orientation
+
+Before reading docs/, run quick checks to scope the current state:
+
+```bash
+# What files exist for this phase? (avoids re-reading plan for file list)
+find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" -newer docs/plan.md 2>/dev/null | head -20
+
+# Any test files already written?
+find . -name "*.test.*" -o -name "*.spec.*" 2>/dev/null | head -10
+
+# How much has changed since last session?
+git diff --stat HEAD~1 2>/dev/null || echo "No git history"
+```
+
+Use these results to calibrate Step 2 — skip full file reads if orientation shows nothing has changed.
+
 ### Step 2: Assess current state
 
 Before building, check if this phase has prior work from a previous session:
@@ -119,3 +136,7 @@ Tell the user:
 - **Verify before done.** Never mark a phase complete without running verification.
 - **Keep context alive.** Everything important goes into learnings.md, decisions.md, or CLAUDE.md — not just conversation context.
 - **Spec reconciliation is not optional.** Don't work around a spec gap with a guess — the spec is the source of truth, and if it's wrong, fix it first. But keep reconciliation lightweight: resolve the specific issue, don't re-open the full discovery.
+
+## Performance Notes
+<!-- Updated by /retro. Do not edit manually. -->
+<!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->

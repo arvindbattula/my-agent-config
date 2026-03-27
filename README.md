@@ -47,14 +47,16 @@ cd my-agent-config
 | Command | Purpose |
 |---------|---------|
 | `/scaffold` | Bootstrap `CLAUDE.md` + `docs/` directory for any new project |
-| `/discover` | Structured product interview (scales by project size) → writes `spec.md`. Includes structured `Accepts/Returns/Errors` for operations and a spec self-audit before finalizing. |
-| `/blueprint` | Break spec into phased build plan → writes `plan.md`. Cross-checks phase integration before presenting. |
-| `/construct` | Execute one phase at a time. Resumes partial work from prior sessions. Live spec reconciliation when gaps are found mid-build. |
-| `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, security) |
+| `/discover` | Structured product interview (scales by project size) → writes `spec.md`. Reads engineering patterns and blind spots from past projects. Includes EARS requirements and spec self-audit. |
+| `/blueprint` | Break spec into phased build plan → writes `plan.md`. Orientation step checks existing code. Cross-checks phase integration. Reads engineering patterns. |
+| `/construct` | Execute one phase at a time. Orientation step scopes changes. Resumes partial work. Live spec reconciliation when gaps found. |
+| `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, security). Orientation step calibrates review depth to codebase size. |
 | `/decide` | Log architecture/product decisions with rationale → `decisions.md` |
-| `/retro` | Project retrospective — identifies discovery blind spots, feeds back into `/discover` |
+| `/retro` | Project retrospective — extracts blind spots, positive patterns, and skill performance notes. Feeds back into all workflow skills. |
 
-Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a project ships — it makes future `/discover` sessions smarter by learning from past misses.
+Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a project ships — it makes the entire workflow smarter by learning from each project.
+
+**Self-improving workflow:** Each workflow command has a `## Performance Notes` section that `/retro` populates with dated, evidence-backed observations. Patterns validated across 3+ projects get proposed as actual skill instruction changes. Positive engineering patterns (validated tech choices, architectural approaches) persist in auto-memory and feed into `/discover` and `/blueprint`.
 
 **Utility commands:**
 
