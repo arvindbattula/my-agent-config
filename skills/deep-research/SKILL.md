@@ -7,6 +7,18 @@ description: "Convergence-driven deep research on any topic. Generates diverse s
 
 Autonomous, convergence-driven research agent. Searches broadly, fetches sources, synthesizes findings, identifies gaps, and iterates until the brief converges — then saves the result as a markdown file.
 
+## Prerequisites
+
+This skill uses the following tools:
+
+- **`WebSearch`** (required) — built-in Claude Code tool for general web search
+- **`WebFetch`** (required) — built-in Claude Code tool for fetching and extracting web page content
+- **`mcp__serpapi__search`** (optional, recommended) — SerpAPI MCP server providing specialty search engines: `google_light`, `google_news`, `google_finance`, `youtube_search`, `google_shopping`, `google_images`, `google_jobs`
+
+**Fallback behavior:** If `mcp__serpapi__search` is not available, use only `WebSearch` for all queries. Multi-engine routing (Step 2) will be skipped — all queries go through WebSearch instead. The skill still works, but with reduced source diversity since specialty engines (news, finance, YouTube, etc.) won't be available.
+
+---
+
 ## Process Overview
 
 1. Scope the research topic
@@ -68,6 +80,8 @@ Fire ALL search calls in a single message with parallel tool calls. For each que
 **If routed to a specialty engine only** (google_news, google_finance, youtube_search, google_shopping, google_jobs):
 - Call only `mcp__serpapi__search` with the appropriate `engine` value and `mode: "compact"`
 - Do NOT also call WebSearch — specialty engines are sufficient for their domain
+
+**If `mcp__serpapi__search` is not available**, fall back to using `WebSearch` for ALL queries. Skip the engine routing table — send every query through `WebSearch` only. The rest of the pipeline (fetch, synthesize, converge) works the same.
 
 Maximize parallelism. All queries for a single iteration should be dispatched in one batch.
 
