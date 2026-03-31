@@ -1,3 +1,8 @@
+---
+name: decide
+description: Record an architecture or product decision
+---
+
 Record an architecture or product decision with full context in `docs/decisions.md`.
 
 ## When to Use

@@ -1,3 +1,8 @@
+---
+name: organize-claude-config
+description: Refactor CLAUDE.md for progressive disclosure
+---
+
 Refactor my CLAUDE.md file to follow progressive disclosure principles.
 
 Follow these steps:

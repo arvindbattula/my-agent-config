@@ -1,3 +1,8 @@
+---
+name: retro
+description: Project retrospective — review workflow and extract patterns
+---
+
 Project retrospective that reviews how well you thought about the problem upfront, what worked, and how each workflow skill performed. Run this when a project hits a milestone or ships. The goal is not to review code quality (that's `/inspect`) — it's to make the entire workflow smarter for the next project.
 
 ## Prerequisites

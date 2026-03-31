@@ -1,3 +1,8 @@
+---
+name: cleanup-ai-slop
+description: Remove AI-generated slop from the current branch
+---
+
 Check the diff against main, and remove all AI generated slop introduced in this branch.
 
 This includes:

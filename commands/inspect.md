@@ -1,3 +1,8 @@
+---
+name: inspect
+description: Multi-pass review of the current codebase
+---
+
 Multi-pass review of the current codebase. Checks architecture, spec compliance, edge cases, code quality, and security. Outputs categorized findings and promotes broadly useful learnings to global memory.
 
 ## Prerequisites

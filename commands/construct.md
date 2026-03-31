@@ -1,3 +1,8 @@
+---
+name: construct
+description: Execute one phase from the build plan
+---
+
 Execute one phase from the build plan. Builds incrementally, verifies before marking done, and records learnings.
 
 ## Arguments

@@ -1,3 +1,8 @@
+---
+name: discover
+description: Structured product discovery interview
+---
+
 Structured product discovery interview. Guides the user from a fuzzy idea to a complete specification written to `docs/spec.md`. Claude leads the interview, does the writing, surfaces unknowns. The user answers questions and makes decisions.
 
 **This is NOT the same as /grill-me.** Grill-me is general-purpose questioning. Discover is a structured product definition process with layered interview phases and a persisted spec output.

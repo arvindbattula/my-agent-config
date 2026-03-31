@@ -1,3 +1,8 @@
+---
+name: scaffold
+description: Create project scaffolding for structured AI-assisted development
+---
+
 Create the project scaffolding for structured AI-assisted development in the current working directory.
 
 ## Steps

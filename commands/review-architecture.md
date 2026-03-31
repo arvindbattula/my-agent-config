@@ -1,3 +1,8 @@
+---
+name: review-architecture
+description: Find architectural improvements by deepening shallow modules
+---
+
 Explore this codebase to find opportunities for architectural improvement. Focus on making the codebase more testable by deepening shallow modules.
 
 A **deep module** (John Ousterhout, "A Philosophy of Software Design") has a small interface hiding a large implementation. Deep modules are more testable, more navigable, and let you test at the boundary instead of inside.

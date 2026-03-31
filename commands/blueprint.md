@@ -1,3 +1,8 @@
+---
+name: blueprint
+description: Break the project spec into a phased build plan
+---
+
 Break the project specification into a phased, ordered build plan. Each phase is small enough to complete and verify in one Claude Code session.
 
 ## Prerequisites

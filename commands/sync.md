@@ -1,3 +1,8 @@
+---
+name: sync
+description: Run install.sh to sync repo and ~/.claude/
+---
+
 Run the install.sh script from the my-agent-config repo to compare the repo and ~/.claude/ directory.
 
 1. First, find the my-agent-config repo. Check these locations in order:
