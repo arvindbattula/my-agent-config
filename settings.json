@@ -16,8 +16,8 @@
   },
   "enabledPlugins": {
     "document-skills@anthropic-agent-skills": true,
-    "ralph-loop@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true
   },
-  "alwaysThinkingEnabled": true
+  "alwaysThinkingEnabled": true,
+  "autoUpdatesChannel": "stable"
 }

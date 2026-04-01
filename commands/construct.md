@@ -145,3 +145,6 @@ Tell the user:
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
 <!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->
+- 2026-03-31 [innovate-intel]: Context window management advice was critical — Phase 8e/8f was deferred to a fresh session after 8a-8d filled context. Fresh session produced clean code on first pass (evidence: session handoff message)
+- 2026-03-31 [innovate-intel]: Batching independent frontend fixes into parallel edits worked well (8e-a through 8e-d). Backend fixes needed sequential handling due to shared server.py (evidence: docs/learnings.md Phase 8e/8f)
+- 2026-03-31 [innovate-intel]: Vitest fake timers + React = fragile. Two tests broke due to jsdom incompatibility. Deferred-promise pattern (control when the mock resolves) is more reliable than vi.useFakeTimers() for async polling tests (evidence: docs/learnings.md)
