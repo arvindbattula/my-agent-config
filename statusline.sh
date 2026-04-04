@@ -4,8 +4,9 @@ input=$(cat)
 MODEL=$(echo "$input" | jq -r '.model.display_name')
 DIR=$(echo "$input" | jq -r '.workspace.current_dir')
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0')
-PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)
+PCT=$(echo "$input" | jq -r 'if (.context_window.used_percentage | type) == "number" then .context_window.used_percentage else 0 end' | cut -d. -f1)
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0')
+TOKENS=$(echo "$input" | jq -r '(.context_window.current_usage // {}) | (.input_tokens // 0) + (.cache_creation_input_tokens // 0) + (.cache_read_input_tokens // 0)')
 
 CYAN='\033[36m'; GREEN='\033[32m'; YELLOW='\033[33m'; RED='\033[31m'; RESET='\033[0m'
 
@@ -36,8 +37,8 @@ if git -C "$DIR" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     if [ -n "$STATUS_OUTPUT" ]; then
         TOTAL_FILES=$(echo "$STATUS_OUTPUT" | wc -l | xargs)
         LINE_STATS=$(git -C "$DIR" diff --numstat HEAD 2>/dev/null | awk '{added+=$1; removed+=$2} END {print added+0, removed+0}')
-        ADDED=$(echo $LINE_STATS | cut -d' ' -f1)
-        REMOVED=$(echo $LINE_STATS | cut -d' ' -f2)
+        ADDED=$(echo "$LINE_STATS" | cut -d' ' -f1)
+        REMOVED=$(echo "$LINE_STATS" | cut -d' ' -f2)
         BRANCH=" | ${YELLOW}(${BRANCH_NAME}${RESET} ${YELLOW}|${RESET} ${GRAY}${TOTAL_FILES} files${RESET}"
         [ "$ADDED" -gt 0 ] && BRANCH="${BRANCH} ${GREEN}+${ADDED}${RESET}"
         [ "$REMOVED" -gt 0 ] && BRANCH="${BRANCH} ${RED}-${REMOVED}${RESET}"
@@ -49,4 +50,5 @@ fi
 
 echo -e "${CYAN}[$MODEL]${RESET} 📁 ${DIR_NAME}${BRANCH}"
 COST_FMT=$(printf '$%.2f' "$COST")
-echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% | ${YELLOW}${COST_FMT}${RESET} | ⏱️ ${MINS}m ${SECS}s"
+TOKENS_K=$(echo "$TOKENS" | awk '{printf "%dk", $1/1000}')
+echo -e "${BAR_COLOR}${BAR}${RESET} ${PCT}% ${GRAY}(${TOKENS_K})${RESET} | ${YELLOW}${COST_FMT}${RESET} | ⏱️ ${MINS}m ${SECS}s"
