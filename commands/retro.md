@@ -69,7 +69,7 @@ Why it worked: [context — what about this project made it a good fit]
 Reuse when: [conditions where this pattern applies]
 ```
 
-Write to `~/.claude/projects/-Users-arvindbattula/memory/engineering_patterns.md`:
+Write to `~/.claude/memory/engineering_patterns.md`:
 - If the pattern already exists, increment "seen in" count and add this project's context
 - If new and this is the first project, add under the appropriate section (Tech Choices, Architectural Patterns, or Gotchas) and mark as `(provisional — 1 project)`
 - If seen in 2+ projects, update to `(validated — N projects)`
@@ -147,7 +147,7 @@ Sort by priority (high first), then by frequency.
 
 ### Step 6: Update the memory index
 
-If this is the first retro, add pointers to `discovery-blind-spots.md` and `engineering_patterns.md` in `~/.claude/projects/-Users-arvindbattula/memory/MEMORY.md` (if not already there).
+If this is the first retro, add pointers to `discovery-blind-spots.md` and `engineering_patterns.md` in `~/.claude/memory/MEMORY.md` (if not already there).
 
 ### Step 7: Report
 
