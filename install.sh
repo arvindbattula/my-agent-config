@@ -472,6 +472,12 @@ print_header "Config Files"
 sync_single_file "settings.json"
 sync_single_file "statusline.sh"
 
+sync_files "Hooks" "$REPO_DIR/hooks" "$CLAUDE_DIR/hooks" "*"
+# Ensure hooks are executable after sync
+if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/hooks" ]; then
+    chmod +x "$CLAUDE_DIR/hooks"/*.sh 2>/dev/null || true
+fi
+
 # Summary
 echo ""
 echo -e "${BOLD}Summary${NC}"
