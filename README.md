@@ -84,6 +84,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `no-backwards-compat` | No migration shims or compatibility wrappers unless explicitly asked |
 | `batch-loop-exception-breadth` | Use broad `except Exception` per item in batch loops calling external services |
 | `like-wildcard-escaping` | Escape `%`, `_`, `\` in SQL LIKE with user input, even when parameterized |
+
 ### Hooks
 | Hook | Trigger | Purpose |
 |------|---------|---------|
