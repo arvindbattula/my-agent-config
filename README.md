@@ -82,6 +82,9 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `sunk-cost-breaker` | Stop after 3+ failed attempts; propose fresh restart with lessons learned |
 | `no-lint-suppression` | Fix lint/type errors, never suppress with eslint-disable or ts-ignore |
 | `no-backwards-compat` | No migration shims or compatibility wrappers unless explicitly asked |
+| `batch-loop-exception-breadth` | Use broad `except Exception` per item in batch loops calling external services |
+| `like-wildcard-escaping` | Escape `%`, `_`, `\` in SQL LIKE with user input, even when parameterized |
+| `three-gate-verification` | Run tests + lint + build before declaring frontend work done |
 
 ### Hooks
 | Hook | Trigger | Purpose |

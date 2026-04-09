@@ -1,0 +1,1 @@
+When a batch loop processes items that may call external services (APIs, LLMs, embeddings), use a broad `except Exception` per item — not a narrow DB-specific exception. A narrow handler (e.g., `except sqlite3.Error`) won't catch API failures, letting one item's external call failure kill the entire batch and leave remaining items unprocessed. Log the error per item and continue.

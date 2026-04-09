@@ -1,0 +1,1 @@
+When using SQL LIKE with user-supplied input, always escape `%`, `_`, and `\` characters even when the query is parameterized. These are LIKE wildcards, not SQL injection — parameterization doesn't neutralize them. Use the database's ESCAPE clause (e.g., `LIKE ? ESCAPE '\'` in SQLite) after replacing `\` → `\\`, `%` → `\%`, `_` → `\_` in the input string.
