@@ -73,19 +73,17 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 ### Rules (always-on)
 | Rule | Behavior |
 |------|----------|
-| `verify-before-done` | Always verify work before declaring complete |
+| `verify-before-done` | Always verify work before declaring complete; frontend requires tests + lint + build |
 | `no-ai-slop` | No obvious comments, no unnecessary defensive checks |
 | `simplicity-over-cleverness` | Simplest solution that works, no over-engineering |
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
-| `minimal-diff` | Only change what's necessary; flag nearby bugs but don't fix unsolicited |
+| `minimal-diff` | Only change what's necessary; exception: update broken call sites directly |
 | `check-docs-first` | Look up current docs for external libraries/APIs before writing code |
 | `sunk-cost-breaker` | Stop after 3+ failed attempts; propose fresh restart with lessons learned |
 | `no-lint-suppression` | Fix lint/type errors, never suppress with eslint-disable or ts-ignore |
 | `no-backwards-compat` | No migration shims or compatibility wrappers unless explicitly asked |
 | `batch-loop-exception-breadth` | Use broad `except Exception` per item in batch loops calling external services |
 | `like-wildcard-escaping` | Escape `%`, `_`, `\` in SQL LIKE with user input, even when parameterized |
-| `three-gate-verification` | Run tests + lint + build before declaring frontend work done |
-
 ### Hooks
 | Hook | Trigger | Purpose |
 |------|---------|---------|

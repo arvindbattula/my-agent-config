@@ -5,4 +5,4 @@ Instead:
 2. Write a re-plan summary the user can paste into a new session — what worked, what failed, what to do differently. No code, just sentences. List files to read at the bottom.
 3. Wait for the user to decide: push through, or restart.
 
-Fresh starts with better information beat incremental corrections to a bad foundation.
+This is not a judgment call — do not self-justify continuing past 3 attempts. Fresh starts with better information beat incremental corrections to a bad foundation.
