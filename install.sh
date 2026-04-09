@@ -118,7 +118,7 @@ ask_action() {
     fi
 
     if [ "$status" = "differs" ]; then
-        echo -e "  ${YELLOW}~${NC} ${name} ${GRAY}(differs)${NC}"
+        echo -e "  ${YELLOW}~${NC} ${name} ${GRAY}(differs)${NC}" >&2
         read -p "    Use [r]epo / keep [l]ocal / show [d]iff / [s]kip? " choice
         case "$choice" in
             r|R) echo "repo" ;;
@@ -129,7 +129,7 @@ ask_action() {
     elif [ "$status" = "repo_only" ]; then
         echo "repo"
     elif [ "$status" = "local_only" ]; then
-        echo -e "  ${CYAN}+${NC} ${name} ${GRAY}(local only, not in repo)${NC}"
+        echo -e "  ${CYAN}+${NC} ${name} ${GRAY}(local only, not in repo)${NC}" >&2
         read -p "    Copy to [r]epo / [s]kip? " choice
         case "$choice" in
             r|R) echo "to_repo" ;;
@@ -188,13 +188,13 @@ sync_directories() {
                             cp -r "$r" "$l"
                             ((actions_taken++))
                         fi
-                        echo -e "    ${GREEN}→ copied repo to local${NC}${DRY_RUN:+ (dry-run)}"
+                        echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
                     elif [ "$action" = "local" ]; then
                         if ! $DRY_RUN; then
                             cp -r "$l" "$r"
                             ((actions_taken++))
                         fi
-                        echo -e "    ${GREEN}→ copied local to repo${NC}${DRY_RUN:+ (dry-run)}"
+                        echo -e "    ${GREEN}→ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
                     elif [ "$action" = "diff" ]; then
                         diff -rq "$r" "$l" || true
                         # Re-ask after showing diff
@@ -245,7 +245,7 @@ sync_directories() {
                             cp -r "$l" "$r"
                             ((actions_taken++))
                         fi
-                        echo -e "    ${GREEN}→ copied to repo${NC}${DRY_RUN:+ (dry-run)}"
+                        echo -e "    ${GREEN}→ copied to repo${NC}$($DRY_RUN && echo " (dry-run)")"
                     fi
                 fi
                 ((local_only++))
@@ -301,13 +301,13 @@ sync_files() {
                             cp "$r" "$l"
                             ((actions_taken++))
                         fi
-                        echo -e "    ${GREEN}→ copied repo to local${NC}${DRY_RUN:+ (dry-run)}"
+                        echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
                     elif [ "$action" = "local" ]; then
                         if ! $DRY_RUN; then
                             cp "$l" "$r"
                             ((actions_taken++))
                         fi
-                        echo -e "    ${GREEN}→ copied local to repo${NC}${DRY_RUN:+ (dry-run)}"
+                        echo -e "    ${GREEN}→ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
                     elif [ "$action" = "diff" ]; then
                         diff "$r" "$l" || true
                         read -p "    Use [r]epo / keep [l]ocal / [s]kip? " choice2
@@ -356,7 +356,7 @@ sync_files() {
                             cp "$l" "$r"
                             ((actions_taken++))
                         fi
-                        echo -e "    ${GREEN}→ copied to repo${NC}${DRY_RUN:+ (dry-run)}"
+                        echo -e "    ${GREEN}→ copied to repo${NC}$($DRY_RUN && echo " (dry-run)")"
                     fi
                 fi
                 ((local_only++))
@@ -391,13 +391,13 @@ sync_single_file() {
                         cp "$repo_file" "$local_file"
                         ((actions_taken++))
                     fi
-                    echo -e "    ${GREEN}→ copied repo to local${NC}${DRY_RUN:+ (dry-run)}"
+                    echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
                 elif [ "$action" = "local" ]; then
                     if ! $DRY_RUN; then
                         cp "$local_file" "$repo_file"
                         ((actions_taken++))
                     fi
-                    echo -e "    ${GREEN}→ copied local to repo${NC}${DRY_RUN:+ (dry-run)}"
+                    echo -e "    ${GREEN}→ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
                 elif [ "$action" = "diff" ]; then
                     diff "$repo_file" "$local_file" || true
                     read -p "    Use [r]epo / keep [l]ocal / [s]kip? " choice2
@@ -445,7 +445,7 @@ sync_single_file() {
                         cp "$local_file" "$repo_file"
                         ((actions_taken++))
                     fi
-                    echo -e "    ${GREEN}→ copied to repo${NC}${DRY_RUN:+ (dry-run)}"
+                    echo -e "    ${GREEN}→ copied to repo${NC}$($DRY_RUN && echo " (dry-run)")"
                 fi
             fi
             ((local_only++))
