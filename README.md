@@ -79,6 +79,9 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
 | `minimal-diff` | Only change what's necessary; flag nearby bugs but don't fix unsolicited |
 | `check-docs-first` | Look up current docs for external libraries/APIs before writing code |
+| `sunk-cost-breaker` | Stop after 3+ failed attempts; propose fresh restart with lessons learned |
+| `no-lint-suppression` | Fix lint/type errors, never suppress with eslint-disable or ts-ignore |
+| `no-backwards-compat` | No migration shims or compatibility wrappers unless explicitly asked |
 
 ### Hooks
 | Hook | Trigger | Purpose |

@@ -1,0 +1,1 @@
+Don't preserve backwards compatibility unless the user asks for it. No migration shims, no re-exporting old interfaces, no renaming unused variables with _ prefix, no "deprecated" wrappers. Make the simplest change for the current codebase. If call sites break, update them.

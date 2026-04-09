@@ -1,0 +1,1 @@
+Fix lint and type errors. Never suppress them with eslint-disable, @ts-ignore, @ts-expect-error, noqa, type: ignore, or equivalent directives. If a lint rule is genuinely wrong for the project, tell the user — don't silently disable it inline.

@@ -97,6 +97,8 @@ Run the verification steps listed in the phase:
 
 If verification fails, fix the issue. If you can't fix it, explain what's wrong and ask for guidance.
 
+**Circuit breaker:** If you've attempted the same fix 3+ times, or you're working around your own earlier changes, stop. Don't keep patching. Write a re-plan summary (what worked, what failed, what to try differently — no code, just sentences, files to read at the bottom) and ask the user whether to push through or restart fresh.
+
 ### Step 6: Record learnings
 
 Append to `docs/learnings.md` anything surprising or useful discovered during this phase:
