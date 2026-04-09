@@ -80,8 +80,13 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `minimal-diff` | Only change what's necessary; flag nearby bugs but don't fix unsolicited |
 | `check-docs-first` | Look up current docs for external libraries/APIs before writing code |
 
+### Hooks
+| Hook | Trigger | Purpose |
+|------|---------|---------|
+| `compress-memory.sh` | PostToolUse → Write | Auto-compress prose in memory files (filler removal, phrase shortening). Preserves frontmatter, code, URLs, paths. Validates before writing, restores on corruption. |
+
 ### Config
-- `settings.json` — Permissions, extended thinking, plugins, statusline
+- `settings.json` — Permissions, hooks, extended thinking, plugins, statusline
 - `statusline.sh` — Terminal status bar showing directory, model, context usage, git state
 
 ## How Sync Works
@@ -95,6 +100,8 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 - `~` Both exist, differ — lets you choose which to keep
 
 All overwrites create timestamped backups in `~/.claude/backups/`.
+
+> **Note:** A running Claude Code session manages `~/.claude/settings.json` in memory and may overwrite external changes. If `settings.json` shows as "differs" after sync, exit all Claude Code sessions first, then run `./install.sh` again.
 
 ## Origin
 
