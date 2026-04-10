@@ -190,6 +190,7 @@ Then suggest: "When you're happy with the spec, run `/blueprint` to create the p
 - **Name the unknowns.** If the user says "I'm not sure," that's fine — capture it as an open question in the spec rather than guessing.
 - **Recommend when asked.** If the user wants Claude's opinion on tech choices, give an opinionated recommendation with rationale, not a list of options.
 - **Don't over-spec quick scripts.** A utility script needs 10 lines of spec, not 2 pages.
+- **Reframe vague requirements as success criteria.** "Make it fast" → "Dashboard LCP < 2.5s on 4G, initial data load < 500ms, CLS < 0.1. Are these the right targets?"
 
 ## Common Rationalizations
 

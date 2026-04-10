@@ -35,6 +35,12 @@ grep -rn "TODO\|FIXME\|HACK\|XXX" --include="*.ts" --include="*.tsx" --include="
 
 Use this to calibrate review depth — a 5-file project doesn't need the same scrutiny as a 50-file project.
 
+**Change sizing (if reviewing a PR or branch):**
+- ~100 lines → Reviewable in one sitting
+- ~300 lines → Acceptable if single logical change
+- ~1000 lines → Too large. Recommend splitting.
+- Separate refactoring from feature work — they're two different changes.
+
 ### Pass 1: Architecture
 
 Explore the codebase and assess:
@@ -69,6 +75,7 @@ Review for:
 - Naming — are variables, functions, files named clearly?
 - Consistency — does the code follow its own patterns?
 - Dead code — anything unused?
+- Dependencies — any new deps added? Check: does existing stack solve this? Bundle impact? Actively maintained? Known vulnerabilities? License compatible? Prefer standard library over new dependencies.
 
 ### Pass 5: Security *(for team/public-facing projects)*
 
@@ -83,7 +90,16 @@ See `security-hardening` skill for full guidance. Check OWASP basics:
 
 ## Output
 
-Present findings organized by severity:
+Present findings organized by severity. Within each category, label individual findings:
+
+| Prefix | Meaning | Author Action |
+|--------|---------|---------------|
+| **Critical:** | Security vulnerability, data loss, broken functionality | Must fix before merge |
+| **Important:** | Real issue that should be addressed | Must address or justify deferral |
+| **Nit:** | Minor, optional — style or preference | Author may ignore |
+| **FYI** | Informational, no action needed | Context for future reference |
+
+Categories:
 
 ### Fix Now
 (Issues that block further development or pose real risk)

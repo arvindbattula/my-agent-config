@@ -22,6 +22,17 @@ Characteristics:
 - Describes WHAT, not HOW
 - One logical assertion per test
 
+## Anti-Patterns
+
+| Anti-Pattern | Problem | Fix |
+|---|---|---|
+| Testing implementation details | Breaks on refactor even if behavior unchanged | Test inputs and outputs, not internal structure |
+| Flaky tests (timing, order-dependent) | Erodes trust in test suite | Deterministic assertions, isolate test state |
+| Snapshot abuse | Large snapshots nobody reviews, break on any change | Use sparingly, review every change |
+| Mocking everything | Tests pass, production breaks | Real implementations > fakes > stubs > mocks |
+| No test isolation | Pass individually, fail together | Each test manages its own state |
+| Testing framework code | Wastes time testing third-party behavior | Only test YOUR code |
+
 ## Bad Tests
 
 **Implementation-detail tests**: Coupled to internal structure.

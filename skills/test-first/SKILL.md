@@ -40,6 +40,24 @@ RIGHT (vertical):
   ...
 ```
 
+## Bug Fix Pattern (Prove-It)
+
+When a bug is reported, do NOT start by trying to fix it. Start by writing a test that reproduces it.
+
+1. Write a test that demonstrates the bug → test FAILS (confirms bug exists)
+2. Implement the fix → test PASSES (proves fix works)
+3. Run full test suite → no regressions
+
+This ensures the bug is actually fixed and can never silently return.
+
+## Test Naming
+
+Test names should read like specifications:
+- Good: `it('rejects tasks with empty titles')`
+- Good: `it('sets completedAt when task is completed')`
+- Bad: `it('validates titles correctly')`
+- Bad: `it('works')`
+
 ## Workflow
 
 ### 1. Planning
