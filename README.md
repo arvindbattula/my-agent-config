@@ -126,3 +126,5 @@ All overwrites create timestamped backups in `~/.claude/backups/`.
 ## Origin
 
 Skills originally ported from [brianlovin/agent-config](https://github.com/brianlovin/agent-config) and [mattpocock/skills](https://github.com/mattpocock/skills), renamed for clarity, reorganized into skills vs commands, and extended with custom rules.
+
+Security, debugging, API design, git workflow, performance, frontend UI, and shipping skills adapted from [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) — a production-grade engineering skills library for AI coding agents. Anti-rationalization tables and red flags patterns also drawn from that project.
