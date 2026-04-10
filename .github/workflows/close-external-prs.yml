@@ -1,0 +1,31 @@
+name: Close PRs from non-collaborators
+
+on:
+  pull_request_target:
+    types: [opened]
+
+jobs:
+  check-author:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if PR author is a collaborator
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          # Check collaborator permission (returns admin, write, read, or none)
+          PERMISSION=$(gh api "repos/$REPO/collaborators/$AUTHOR/permission" \
+            --jq '.permission' 2>/dev/null || echo "none")
+
+          if [ "$PERMISSION" = "none" ] || [ "$PERMISSION" = "read" ]; then
+            echo "Closing PR #$PR_NUMBER from non-collaborator: $AUTHOR (permission: $PERMISSION)"
+
+            gh pr close "$PR_NUMBER" \
+              --repo "$REPO" \
+              --comment "Thanks for your interest, but this repo only accepts PRs from collaborators. PR auto-closed."
+          else
+            echo "PR author $AUTHOR is a collaborator (permission: $PERMISSION) - allowing"
+          fi

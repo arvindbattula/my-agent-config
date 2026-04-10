@@ -30,6 +30,13 @@ The engineering workflow (`/idea-refine` → `/discover` → `/blueprint` → `/
 - Patterns validated across 3+ projects get proposed as skill instruction changes
 - Engineering patterns persist in auto-memory and feed back into `/discover` and `/blueprint`
 
+## Branch Protection
+
+- `main` is protected by a GitHub ruleset — collaborators must open a PR with owner approval
+- Admin (repo owner) can bypass and push directly
+- `.github/workflows/protect-main.yml` — flags direct pushes by creating an issue
+- `.github/workflows/close-external-prs.yml` — auto-closes PRs from non-collaborators
+
 ## Verification
 
 After making changes:

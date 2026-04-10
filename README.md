@@ -123,6 +123,12 @@ All overwrites create timestamped backups in `~/.claude/backups/`.
 
 > **Note:** A running Claude Code session manages `~/.claude/settings.json` in memory and may overwrite external changes. If `settings.json` shows as "differs" after sync, exit all Claude Code sessions first, then run `./install.sh` again.
 
+## Contributing
+
+- `main` is protected — all changes require a PR with owner approval
+- PRs from non-collaborators are auto-closed
+- Direct pushes to `main` are flagged via GitHub Actions
+
 ## Origin
 
 Skills originally ported from [brianlovin/agent-config](https://github.com/brianlovin/agent-config) and [mattpocock/skills](https://github.com/mattpocock/skills), renamed for clarity, reorganized into skills vs commands, and extended with custom rules.
