@@ -110,6 +110,37 @@ For each workflow skill that was used in this project (`/discover`, `/blueprint`
 - Were any passes consistently empty (candidate for skipping by project type)?
 - Did the "promote to global" step produce useful suggestions?
 
+**For `/ship`** — Review the launch process (if `/ship` was run):
+- Did the pre-launch checklist catch real issues before deploy?
+- Were any checklist sections consistently irrelevant for this project type?
+- Was the rollback plan tested or needed?
+- Were there post-deploy surprises the checklist should have caught?
+
+**For `security-hardening`** — Review security posture (if security was relevant):
+- Were security issues found during `/inspect` that the skill should have prevented earlier?
+- Did the three-tier boundary system (Always/Ask/Never) hold up?
+- Any false positives (security guidance that didn't apply to this project type)?
+
+**For `debugging`** — Review bug encounters (if bugs were debugged):
+- Did the triage checklist (reproduce → localize → reduce → fix → guard) save time vs. guessing?
+- Were there debugging patterns not covered by the skill?
+- Did regression tests written during debugging catch anything later?
+
+**For `api-design`** — Review API decisions (if APIs were designed):
+- Did contract-first design prevent rework?
+- Were there API shape changes mid-build that contract-first would have caught?
+- Did the error semantics pattern hold up across endpoints?
+
+**For `git-workflow`** — Review commit discipline (if relevant):
+- Were atomic commits maintained throughout the project?
+- Did the save-point pattern (commit on green, revert on red) help?
+- Were there commit hygiene issues in the final history?
+
+**For `performance`** — Review performance work (if performance was addressed):
+- Did measurement-first catch the actual bottleneck on the first try?
+- Were budget thresholds appropriate for this project?
+- Any performance issues that the skill's diagnostic tree missed?
+
 For each skill, append dated observations to the `## Performance Notes` section at the bottom of the skill file:
 - Format: `- YYYY-MM-DD [project-name]: observation (evidence: docs/learnings.md, etc.)`
 - Cap at **5 notes per skill per retro** — highest signal only
