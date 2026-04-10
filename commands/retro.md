@@ -141,6 +141,16 @@ For each workflow skill that was used in this project (`/discover`, `/blueprint`
 - Were budget thresholds appropriate for this project?
 - Any performance issues that the skill's diagnostic tree missed?
 
+**For `/idea-refine`** — Review the idea refinement (if `/idea-refine` was run):
+- Did the divergent phase (variations) surface the direction that was ultimately chosen?
+- Were the hidden assumptions identified actually the ones that mattered during build?
+- Was the "Not Doing" list respected, or did scope creep reintroduce items?
+
+**For `frontend-ui`** — Review UI quality (if frontend was built):
+- Did the AI aesthetic anti-patterns table prevent generic-looking output?
+- Were accessibility issues found late that the skill should have caught earlier?
+- Did the state management decision tree lead to the right choice?
+
 For each skill, append dated observations to the `## Performance Notes` section at the bottom of the skill file:
 - Format: `- YYYY-MM-DD [project-name]: observation (evidence: docs/learnings.md, etc.)`
 - Cap at **5 notes per skill per retro** — highest signal only
