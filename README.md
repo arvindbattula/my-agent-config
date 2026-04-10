@@ -22,9 +22,15 @@ cd my-agent-config
 ### Skills (auto-triggered by Claude)
 | Skill | Purpose |
 |-------|---------|
-| `deep-research` | Convergence-driven research — multi-engine search, iterative synthesis, cited briefs |
 | `plan-build-verify` | Workflow orchestration — plan, build, and verify complex coding tasks |
-| `test-first` | Test-driven development with red-green-refactor |
+| `test-first` | Test-driven development with red-green-refactor and Prove-It bug fix pattern |
+| `deep-research` | Convergence-driven research — multi-engine search, iterative synthesis, cited briefs |
+| `security-hardening` | OWASP Top 10 prevention, input validation, secrets management, npm audit triage |
+| `debugging` | Systematic root-cause debugging — Stop-the-Line rule, 6-step triage checklist |
+| `api-design` | Contract-first API design, error semantics, REST patterns, validation at boundaries |
+| `git-workflow` | Trunk-based development, atomic commits, save-point pattern, git bisect |
+| `performance` | Measurement-first optimization, Core Web Vitals, N+1 prevention, bundle budgets |
+| `frontend-ui` | Component architecture, accessibility (WCAG 2.1 AA), AI aesthetic anti-patterns |
 | `remove-dead-code` | Find and remove unused files, deps, exports via knip |
 | `find-skills` | Discover and install skills from the ecosystem |
 | `skill-creator` | Guide for building new skills |
@@ -38,20 +44,22 @@ cd my-agent-config
 **Workflow — Structured AI-assisted engineering:**
 
 ```
-/scaffold  →  /discover  →  /blueprint  →  /construct  →  /inspect  →  /retro
-                                              ↑              |
-                                              └──────────────┘
-                                           (loop until done)
+/idea-refine → /scaffold → /discover → /blueprint → /construct → /inspect → /ship → /retro
+                                                       ↑              |
+                                                       └──────────────┘
+                                                    (loop until done)
 ```
 
 | Command | Purpose |
 |---------|---------|
+| `/idea-refine` | Divergent→convergent thinking to sharpen fuzzy ideas into buildable concepts |
 | `/scaffold` | Bootstrap `CLAUDE.md` + `docs/` directory for any new project |
-| `/discover` | Structured product interview (scales by project size) → writes `spec.md`. Reads engineering patterns and blind spots from past projects. Includes EARS requirements and spec self-audit. |
+| `/discover` | Structured product interview (scales by project size) → writes `spec.md`. Reads engineering patterns and blind spots from past projects. Includes EARS requirements, boundaries, and spec self-audit. |
 | `/blueprint` | Break spec into phased build plan → writes `plan.md`. Orientation step checks existing code. Cross-checks phase integration. Reads engineering patterns. |
-| `/construct` | Execute one phase at a time. Orientation step scopes changes. Resumes partial work. Live spec reconciliation when gaps found. |
-| `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, security). Orientation step calibrates review depth to codebase size. |
-| `/decide` | Log architecture/product decisions with rationale → `decisions.md` |
+| `/construct` | Execute one phase at a time. Orientation step scopes changes. Resumes partial work. Live spec reconciliation when gaps found. Context window management. |
+| `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, code quality, security). Severity labels, dependency review, change sizing guidance. |
+| `/ship` | Pre-launch checklist (code quality, security, performance, infrastructure, docs). Rollback plan template and post-deploy verification. |
+| `/decide` | Log architecture/product decisions in ADR format → `decisions.md` |
 | `/retro` | Project retrospective — extracts blind spots, positive patterns, and skill performance notes. Feeds back into all workflow skills. |
 
 Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a project ships — it makes the entire workflow smarter by learning from each project.
@@ -85,9 +93,16 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `batch-loop-exception-breadth` | Use broad `except Exception` per item in batch loops calling external services |
 | `like-wildcard-escaping` | Escape `%`, `_`, `\` in SQL LIKE with user input, even when parameterized |
 
+### References (loaded on demand)
+| Reference | Purpose |
+|-----------|---------|
+| `security-checklist.md` | Pre-commit security checklist, OWASP Top 10 quick reference |
+| `accessibility-checklist.md` | WCAG 2.1 AA compliance checklist — keyboard, screen reader, contrast, forms, focus |
+
 ### Hooks
 | Hook | Trigger | Purpose |
 |------|---------|---------|
+| `session-start.sh` | SessionStart | Brief workflow reminder injected at session start |
 | `compress-memory.sh` | PostToolUse → Write | Auto-compress prose in memory files (filler removal, phrase shortening). Preserves frontmatter, code, URLs, paths. Validates before writing, restores on corruption. |
 
 ### Config
