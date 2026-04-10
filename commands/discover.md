@@ -146,6 +146,13 @@ Use this structured format for operations. Use plain EARS for behavioral/state r
 ## Technical Decisions
 (language, framework, architecture — with rationale for each choice)
 
+## Boundaries
+- **Always:** [things the agent must always do — run tests before commits, validate inputs, follow naming conventions]
+- **Ask first:** [things requiring approval — DB schema changes, adding dependencies, changing CI config]
+- **Never:** [hard prohibitions — commit secrets, edit vendor dirs, remove failing tests without approval]
+
+(Feeds directly into CLAUDE.md. Skip for quick scripts.)
+
 ## Edge Cases & Error Handling
 (what can go wrong, how we handle it — full product only)
 
