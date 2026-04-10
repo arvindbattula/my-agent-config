@@ -1,0 +1,38 @@
+name: Protect main from direct pushes
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check-direct-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if push came from a PR merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          REPO="${{ github.repository }}"
+
+          # Check if this commit is associated with a merged PR
+          PR_COUNT=$(gh api "repos/$REPO/commits/$COMMIT_SHA/pulls" \
+            --jq 'length')
+
+          if [ "$PR_COUNT" -eq 0 ]; then
+            PUSHER="${{ github.actor }}"
+            echo "::warning::Direct push to main by $PUSHER (no associated PR)"
+
+            # Create an issue to flag the direct push
+            gh issue create \
+              --repo "$REPO" \
+              --title "Direct push to main by $PUSHER" \
+              --body "Commit \`$COMMIT_SHA\` was pushed directly to main without a PR.
+
+              **Pusher:** $PUSHER
+              **Commit:** https://github.com/$REPO/commit/$COMMIT_SHA
+
+              Please use pull requests for all changes to main."
+          else
+            echo "Push is from a merged PR - all good"
+          fi
