@@ -24,7 +24,7 @@ cd my-agent-config
 |-------|---------|
 | `plan-build-verify` | Workflow orchestration — plan, build, and verify complex coding tasks |
 | `test-first` | Test-driven development with red-green-refactor and Prove-It bug fix pattern |
-| `deep-research` | Convergence-driven research — multi-engine search, iterative synthesis, cited briefs |
+| `deep-research` | Convergence-driven research with adversarial verification — tiered multi-engine search, iterative synthesis, claim challenging, cited briefs |
 | `security-hardening` | OWASP Top 10 prevention, input validation, secrets management, npm audit triage |
 | `debugging` | Systematic root-cause debugging — Stop-the-Line rule, 6-step triage checklist |
 | `api-design` | Contract-first API design, error semantics, REST patterns, validation at boundaries |
