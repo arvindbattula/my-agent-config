@@ -179,46 +179,54 @@ sync_directories() {
                 if $STATUS_ONLY; then
                     echo -e "  ${YELLOW}~${NC} $name ${GRAY}(differs)${NC}"
                     ((local_newer++))
-                else
-                    action=$(ask_action "$name" "differs")
-                    if [ "$action" = "repo" ]; then
-                        if ! $DRY_RUN; then
-                            backup_file "$l"
-                            rm -rf "$l"
-                            cp -r "$r" "$l"
-                            ((actions_taken++))
-                        fi
-                        echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
-                    elif [ "$action" = "local" ]; then
-                        if ! $DRY_RUN; then
-                            cp -r "$l" "$r"
-                            ((actions_taken++))
-                        fi
-                        echo -e "    ${GREEN}→ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
-                    elif [ "$action" = "diff" ]; then
-                        diff -rq "$r" "$l" || true
-                        # Re-ask after showing diff
-                        read -p "    Use [r]epo / keep [l]ocal / [s]kip? " choice2
-                        case "$choice2" in
-                            r|R)
-                                if ! $DRY_RUN; then
-                                    backup_file "$l"
-                                    rm -rf "$l"
-                                    cp -r "$r" "$l"
-                                    ((actions_taken++))
-                                fi
-                                echo -e "    ${GREEN}→ copied repo to local${NC}"
-                                ;;
-                            l|L)
-                                if ! $DRY_RUN; then
-                                    cp -r "$l" "$r"
-                                    ((actions_taken++))
-                                fi
-                                echo -e "    ${GREEN}→ copied local to repo${NC}"
-                                ;;
-                            *) echo -e "    ${GRAY}→ skipped${NC}" ;;
-                        esac
+                elif $FORCE; then
+                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}→ copied repo to local${NC}"
+                    if ! $DRY_RUN; then
+                        backup_file "$l"
+                        rm -rf "$l"
+                        cp -r "$r" "$l"
+                        ((actions_taken++))
                     fi
+                    ((local_newer++))
+                else
+                        action=$(ask_action "$name" "differs")
+                        if [ "$action" = "repo" ]; then
+                            if ! $DRY_RUN; then
+                                backup_file "$l"
+                                rm -rf "$l"
+                                cp -r "$r" "$l"
+                                ((actions_taken++))
+                            fi
+                            echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
+                        elif [ "$action" = "local" ]; then
+                            if ! $DRY_RUN; then
+                                cp -r "$l" "$r"
+                                ((actions_taken++))
+                            fi
+                            echo -e "    ${GREEN}→ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
+                        elif [ "$action" = "diff" ]; then
+                            diff -rq "$r" "$l" || true
+                            read -p "    Use [r]epo / keep [l]ocal / [s]kip? " choice2
+                            case "$choice2" in
+                                r|R)
+                                    if ! $DRY_RUN; then
+                                        backup_file "$l"
+                                        rm -rf "$l"
+                                        cp -r "$r" "$l"
+                                        ((actions_taken++))
+                                    fi
+                                    echo -e "    ${GREEN}→ copied repo to local${NC}"
+                                    ;;
+                                l|L)
+                                    if ! $DRY_RUN; then
+                                        cp -r "$l" "$r"
+                                        ((actions_taken++))
+                                    fi
+                                    echo -e "    ${GREEN}→ copied local to repo${NC}"
+                                    ;;
+                                *) echo -e "    ${GRAY}→ skipped${NC}" ;;
+                            esac
+                        fi
                     ((local_newer++))
                 fi
                 ;;
@@ -292,6 +300,14 @@ sync_files() {
             differs)
                 if $STATUS_ONLY; then
                     echo -e "  ${YELLOW}~${NC} $name ${GRAY}(differs)${NC}"
+                    ((local_newer++))
+                elif $FORCE; then
+                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}→ copied repo to local${NC}"
+                    if ! $DRY_RUN; then
+                        backup_file "$l"
+                        cp "$r" "$l"
+                        ((actions_taken++))
+                    fi
                     ((local_newer++))
                 else
                     action=$(ask_action "$name" "differs")
@@ -382,6 +398,14 @@ sync_single_file() {
         differs)
             if $STATUS_ONLY; then
                 echo -e "  ${YELLOW}~${NC} $name ${GRAY}(differs)${NC}"
+                ((local_newer++))
+            elif $FORCE; then
+                echo -e "  ${YELLOW}~${NC} $name ${GRAY}→ copied repo to local${NC}"
+                if ! $DRY_RUN; then
+                    backup_file "$local_file"
+                    cp "$repo_file" "$local_file"
+                    ((actions_taken++))
+                fi
                 ((local_newer++))
             else
                 action=$(ask_action "$name" "differs")
