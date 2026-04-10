@@ -72,12 +72,14 @@ Review for:
 
 ### Pass 5: Security *(for team/public-facing projects)*
 
-Check OWASP basics:
+See `security-hardening` skill for full guidance. Check OWASP basics:
 - Input validation at system boundaries
 - No secrets in code or config files
 - No SQL/command injection vectors
 - Appropriate access controls
 - Sensitive data handling (logging, storage, transmission)
+- Rate limiting on auth endpoints
+- Security headers configured
 
 ## Output
 

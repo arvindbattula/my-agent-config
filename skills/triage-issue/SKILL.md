@@ -17,6 +17,8 @@ Do NOT ask follow-up questions yet. Start investigating immediately.
 
 ### 2. Explore and diagnose
 
+Follow the `debugging` skill's triage checklist: Reproduce → Localize → Reduce → identify root cause.
+
 Use the Agent tool with subagent_type=Explore to deeply investigate the codebase. Your goal is to find:
 
 - **Where** the bug manifests (entry points, UI, API responses)
