@@ -96,6 +96,27 @@ After all tests pass, look for [refactor candidates](refactoring.md):
 
 **Never refactor while RED.** Get to GREEN first.
 
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "I'll write tests after the code works" | Tests written after test implementation, not behavior. You lose the design pressure. |
+| "This is too simple to test" | Simple code gets complicated. The test documents expected behavior. |
+| "I can see all the tests I need, let me write them all" | That's horizontal slicing. You'll test imagined behavior, not actual behavior. |
+| "Tests slow me down" | Tests slow you now. They speed you every time you change the code later. |
+| "I tested it manually" | Manual testing doesn't persist. Tomorrow's change might break it with no way to know. |
+| "The code is self-explanatory" | Tests ARE the specification. They document what the code should do, not what it does. |
+
+## Red Flags
+
+- Writing code without any corresponding tests
+- Tests that pass on the first run (may not test what you think)
+- Writing all tests before any implementation (horizontal slicing)
+- Test names that don't describe behavior ("works", "handles errors")
+- Bug fixes without reproduction tests
+- Skipping tests to make the suite pass
+- Mocking everything instead of testing real behavior
+
 ## Checklist Per Cycle
 
 ```

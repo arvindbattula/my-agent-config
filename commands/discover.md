@@ -184,6 +184,24 @@ Then suggest: "When you're happy with the spec, run `/blueprint` to create the p
 - **Recommend when asked.** If the user wants Claude's opinion on tech choices, give an opinionated recommendation with rationale, not a list of options.
 - **Don't over-spec quick scripts.** A utility script needs 10 lines of spec, not 2 pages.
 
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "The user knows what they want, I don't need to probe" | Even clear requests have implicit assumptions. The interview surfaces them. |
+| "This is a quick script, skip the interview" | Quick scripts still need scope boundaries. A 2-min interview prevents scope creep. |
+| "I'll figure out requirements during build" | That's how you get mid-build spec reconciliations that derail the session. |
+| "The spec will slow us down" | A 15-minute spec prevents hours of rework. |
+| "Requirements will change anyway" | That's why the spec is a living document. An outdated spec is still better than no spec. |
+
+## Red Flags
+
+- Starting to write code without any written requirements
+- Implementing features not mentioned in any spec
+- "Should I just start building?" before clarifying what "done" means
+- Accepting vague answers without pushing for specifics ("it should be fast" → what's the latency budget?)
+- Skipping layers for a full product because "we already know what we want"
+
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
 <!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->

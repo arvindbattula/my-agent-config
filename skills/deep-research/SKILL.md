@@ -224,3 +224,24 @@ Save the final brief as a markdown file in the current working directory.
 - Examples: `deep-research-llm-inference-optimization.md`, `deep-research-saas-pricing-strategies.md`
 
 After saving, tell the user the file path. Do not print the entire brief in the conversation — it's in the file. Instead, provide a 2-3 sentence summary of the most important findings.
+
+---
+
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "I already know enough about this topic" | Your training data may be outdated. Fresh sources prevent hallucination. |
+| "One search is enough" | Single-source research produces biased results. Multiple engines surface contradictions. |
+| "I'll skip fetching, the snippets are sufficient" | Snippets are fragments. Full source content reveals nuance, caveats, and context that snippets omit. |
+| "Three iterations is overkill" | Stop criteria exist for a reason — if open questions remain and new sources are appearing, iterate. |
+| "The user didn't ask for sources" | Every non-trivial claim needs a citation. Unsourced claims are indistinguishable from hallucination. |
+
+## Red Flags
+
+- Presenting claims without inline citations
+- Using only one search engine for all queries
+- Skipping the convergence check (Step 6)
+- Fetching entire websites when one page is relevant
+- More than 3 sources from the same domain
+- Reporting search snippets as findings without fetching the full source

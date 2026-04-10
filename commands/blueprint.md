@@ -135,6 +135,25 @@ Tell the user: "Run `/construct` to start building Phase 1."
 - **Respect the spec boundaries.** Don't plan features that are listed as out-of-scope in the spec.
 - **Keep it concrete.** "Build the dashboard" is too vague. "Create index.html with a table showing tab data grouped by topic" is specific enough to build from.
 
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "These phases are obvious" | Write them down anyway. Explicit phases surface hidden dependencies and forgotten edge cases. |
+| "Phase 1 should set up infrastructure first" | Phase 1 is always the thinnest vertical slice. No "setup only" phases — every phase has a visible outcome. |
+| "This project is too small to need phases" | Even small projects benefit from a visible completion sequence and explicit "Done when" criteria. |
+| "I can figure out the order as I go" | Implementation order follows the dependency graph. Discovering a missing dependency mid-build wastes the session. |
+| "Planning is overhead" | Planning is the task. Implementation without a plan is just typing. |
+
+## Red Flags
+
+- All phases are XL-sized (too big for one session)
+- No "Done when" criteria on any phase
+- Phase 1 is "setup and configuration" instead of a vertical slice
+- Dependency order not considered
+- No cross-phase integration check performed
+- Phases that assume something exists that no prior phase creates
+
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
 <!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->

@@ -144,6 +144,27 @@ Tell the user:
 - **Keep context alive.** Everything important goes into learnings.md, decisions.md, or CLAUDE.md — not just conversation context.
 - **Spec reconciliation is not optional.** Don't work around a spec gap with a guess — the spec is the source of truth, and if it's wrong, fix it first. But keep reconciliation lightweight: resolve the specific issue, don't re-open the full discovery.
 
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "I can build multiple phases in one session" | One phase per invocation. Context quality degrades with scope — that's why we persist to docs/ files. |
+| "The spec gap is small, I'll work around it" | Spec reconciliation is not optional. Working around gaps produces code that doesn't match the spec. |
+| "I know what the spec meant even though it doesn't say it" | If it's not in the spec, it's not a requirement. Ask, don't guess. |
+| "I'll test it all at the end" | Bugs compound. A bug in the first slice makes later slices wrong. Test each slice. |
+| "Context is fine, I can keep going" | Check the statusline. Above 60%, start a fresh session — docs/ files carry everything forward. |
+| "This refactor is small enough to include" | Refactors mixed with features make both harder to review and debug. Separate them. |
+
+## Red Flags
+
+- Building multiple phases without being asked
+- Working around spec gaps instead of reconciling
+- Context over 60% and starting a new phase
+- No commits between task boundaries
+- More than 100 lines written without running tests
+- Skipping the orientation step (Step 1b)
+- Making non-trivial technical choices without flagging them
+
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
 <!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->

@@ -56,6 +56,27 @@ description: "Workflow orchestration for complex coding tasks. Use for ANY non-t
 5. **Document Results**: Add review section to `tasks/todo.md`
 6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
 
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "This is simple enough to skip planning" | Tasks that feel simple are where hidden complexity lives. 10 min of planning prevents 2 hours of rework. |
+| "I'll plan as I go" | That's how you end up with a tangled mess. Written plans survive session boundaries and context compaction. |
+| "The plan is in my head" | Context windows are finite. Written plans survive compaction and session restarts. |
+| "I can hold all this context" | You can't. That's why we persist to docs/ files. |
+| "This fix is obvious, just do it" | Obvious fixes have non-obvious side effects. Verify before marking done. |
+| "Elegance doesn't matter for a quick fix" | Quick fixes become permanent. A hacky fix you ship is tech debt you own. |
+
+## Red Flags
+
+- Starting implementation without a written plan in tasks/todo.md
+- Multiple unrelated changes accumulating without commits
+- "Let me just quickly add this too" scope expansion
+- Skipping verification to move faster
+- More than 100 lines written without running tests
+- Marking a task complete without proving it works
+- Same fix attempted 3+ times without stopping to re-plan
+
 ## Core Principles
 
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.

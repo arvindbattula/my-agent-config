@@ -126,6 +126,25 @@ Based on findings, suggest:
 - If Fix Later items exist: "Want me to add a cleanup phase to the plan?"
 - If everything looks good: "Codebase is in good shape. Ready for the next `/construct` phase."
 
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "Tests pass, so it's good" | Tests are necessary but not sufficient. They don't catch architecture problems, security issues, or readability concerns. |
+| "I wrote it, so I know it's correct" | Authors are blind to their own assumptions. Every change benefits from another set of eyes. |
+| "This project is small, it doesn't need review" | Small projects have the most concentrated risk per line. A single bug in 500 lines is harder to find than in 50. |
+| "AI-generated code is probably fine" | AI code needs more scrutiny, not less. It's confident and plausible, even when wrong. |
+| "We'll clean it up later" | Later never comes. The review is the quality gate — use it. |
+
+## Red Flags
+
+- Review that only checks if tests pass (ignoring other axes)
+- "LGTM" without evidence of actual review
+- Security-sensitive code without security-focused review
+- Large changes that are "too big to review properly" (split them)
+- No regression tests accompanying bug fixes
+- Accepting "I'll fix it later" for real issues
+
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
 <!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->
