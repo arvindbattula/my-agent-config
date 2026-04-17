@@ -36,10 +36,7 @@ cd my-agent-config
 | `design-polish` | Final-pass design refinement — alignment, spacing, interaction states, micro-details |
 | `design-typography` | Typography assessment and fixes — font selection, hierarchy, readability, scales |
 | `dead-code` | Find and remove unused files, deps, exports via knip |
-| `find-skills` | Discover and install skills from the ecosystem |
-| `skill-creator` | Guide for building new skills |
 | `triage` | Investigate bugs, find root cause, create issue with TDD fix plan |
-| `prompt-craft` | Generate optimized prompts for Claude Code agentic tasks |
 | `diagram` | Render inline interactive visuals — SVG diagrams, HTML widgets, charts |
 | `electron-wrapper` | Wrap a web app into an Electron desktop app |
 

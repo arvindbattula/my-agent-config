@@ -492,7 +492,6 @@ RENAMED_SKILLS=(
     "frontend-ui:react-engineering"
     "visualise:diagram"
     "deep-research:research"
-    "prompt-master:prompt-craft"
     "remove-dead-code:dead-code"
     "security-hardening:security"
     "triage-issue:triage"
@@ -513,6 +512,30 @@ for pair in "${RENAMED_SKILLS[@]}"; do
             backup_file "$old_dir"
             rm -rf "$old_dir"
             echo -e "  ${YELLOW}!${NC} $old ${GRAY}→ removed (renamed to $new)${NC}"
+            ((actions_taken++))
+        fi
+    fi
+done
+
+# Clean up skill directories that were deleted from the repo
+REMOVED_SKILLS=(
+    "find-skills"
+    "prompt-craft"
+    "prompt-master"
+    "skill-creator"
+)
+
+for name in "${REMOVED_SKILLS[@]}"; do
+    old_dir="$CLAUDE_DIR/skills/$name"
+    if [ -d "$old_dir" ]; then
+        if $STATUS_ONLY; then
+            echo -e "  ${YELLOW}!${NC} $name ${GRAY}(removed from repo, will be deleted on sync)${NC}"
+        elif $DRY_RUN; then
+            echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ would remove (deleted from repo)${NC}"
+        else
+            backup_file "$old_dir"
+            rm -rf "$old_dir"
+            echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ removed (deleted from repo)${NC}"
             ((actions_taken++))
         fi
     fi
