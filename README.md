@@ -81,6 +81,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `/grill-me` | Relentlessly interview you about a plan until all decisions are resolved |
 | `/review-architecture` | Find architectural improvements by deepening shallow modules |
 | `/sync` | Compare repo vs local config and resolve differences |
+| `/wrap-session` | End-of-session routine. Routes session learnings (preferences, references, in-flight state) to auto-memory, `docs/state.md`, or CLAUDE.md. Review-before-write, size-capped. |
 
 ### Rules (always-on)
 | Rule | Behavior |
