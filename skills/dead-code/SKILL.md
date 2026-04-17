@@ -1,5 +1,5 @@
 ---
-name: remove-dead-code
+name: dead-code
 description: Run knip to find and remove unused files, dependencies, and exports. Use for cleaning up dead code and unused dependencies.
 ---
 

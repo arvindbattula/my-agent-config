@@ -1,5 +1,5 @@
 ---
-name: security-hardening
+name: security
 description: "Hardens code against vulnerabilities. Use when handling user input, authentication, data storage, file uploads, or external integrations. Use when building any feature that accepts untrusted data, manages user sessions, or interacts with third-party services."
 ---
 

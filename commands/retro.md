@@ -116,7 +116,7 @@ For each workflow skill that was used in this project (`/discover`, `/blueprint`
 - Was the rollback plan tested or needed?
 - Were there post-deploy surprises the checklist should have caught?
 
-**For `security-hardening`** — Review security posture (if security was relevant):
+**For `security`** — Review security posture (if security was relevant):
 - Were security issues found during `/inspect` that the skill should have prevented earlier?
 - Did the three-tier boundary system (Always/Ask/Never) hold up?
 - Any false positives (security guidance that didn't apply to this project type)?
@@ -126,12 +126,12 @@ For each workflow skill that was used in this project (`/discover`, `/blueprint`
 - Were there debugging patterns not covered by the skill?
 - Did regression tests written during debugging catch anything later?
 
-**For `api-design`** — Review API decisions (if APIs were designed):
+**For `api-contracts`** — Review API decisions (if APIs were designed):
 - Did contract-first design prevent rework?
 - Were there API shape changes mid-build that contract-first would have caught?
 - Did the error semantics pattern hold up across endpoints?
 
-**For `git-workflow`** — Review commit discipline (if relevant):
+**For `git`** — Review commit discipline (if relevant):
 - Were atomic commits maintained throughout the project?
 - Did the save-point pattern (commit on green, revert on red) help?
 - Were there commit hygiene issues in the final history?
@@ -146,10 +146,15 @@ For each workflow skill that was used in this project (`/discover`, `/blueprint`
 - Were the hidden assumptions identified actually the ones that mattered during build?
 - Was the "Not Doing" list respected, or did scope creep reintroduce items?
 
-**For `frontend-ui`** — Review UI quality (if frontend was built):
-- Did the AI aesthetic anti-patterns table prevent generic-looking output?
-- Were accessibility issues found late that the skill should have caught earlier?
+**For `react-engineering`** — Review UI quality (if frontend was built):
 - Did the state management decision tree lead to the right choice?
+- Were accessibility issues found late that the skill should have caught earlier?
+- Did the component architecture guidance (file structure, prop drilling limits) hold up?
+
+**For `design-setup`** — Review design quality (if design skills were used):
+- Did the design context (.impeccable.md) guide meaningful design decisions?
+- Were anti-patterns (purple gradients, Inter font, nested cards) avoided?
+- Did the design-review scoring reflect actual quality?
 
 For each skill, append dated observations to the `## Performance Notes` section at the bottom of the skill file:
 - Format: `- YYYY-MM-DD [project-name]: observation (evidence: docs/learnings.md, etc.)`

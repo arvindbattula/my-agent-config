@@ -1,5 +1,5 @@
 ---
-name: api-design
+name: api-contracts
 description: "Guides REST API and interface design. Use when designing API endpoints, defining TypeScript interfaces for module boundaries, or building any system where consumers depend on a contract. Use when adding new endpoints, modifying response shapes, or defining data models that cross boundaries."
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: deep-research
+name: research
 description: "Convergence-driven deep research with adversarial verification. Generates diverse search queries, routes them to tiered search engines (WebSearch, SerpAPI primary/specialty/alternate indexes), fetches and synthesizes sources in iterative phases (Discover → Deepen → Challenge) until gaps converge, then saves a comprehensive research brief as a markdown file. Use when the user says 'research', 'deep dive', 'investigate', 'comprehensive analysis', 'what do we know about', or asks for a thorough multi-source exploration of a topic. Also triggers for: market analysis, technology evaluation, competitive analysis, literature review, trend analysis, or any request that implies gathering information from many sources and synthesizing it."
 ---
 
@@ -296,10 +296,10 @@ Based on the user's response:
 Save the final brief as a markdown file in the current working directory.
 
 **Filename convention:**
-- Prefix: `deep-research-`
+- Prefix: `research-`
 - Slug: kebab-case derived from the topic
 - Max 60 characters before `.md`
-- Examples: `deep-research-llm-inference-optimization.md`, `deep-research-saas-pricing-strategies.md`
+- Examples: `research-llm-inference-optimization.md`, `research-saas-pricing-strategies.md`
 
 After saving, tell the user the file path. Do not print the entire brief in the conversation — it's in the file. Instead, provide a 2-3 sentence summary of the most important findings and note any claims that were weakened or refuted by the Challenge phase.
 

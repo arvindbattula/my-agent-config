@@ -24,19 +24,23 @@ cd my-agent-config
 |-------|---------|
 | `plan-build-verify` | Workflow orchestration — plan, build, and verify complex coding tasks |
 | `test-first` | Test-driven development with red-green-refactor and Prove-It bug fix pattern |
-| `deep-research` | Convergence-driven research with adversarial verification — tiered multi-engine search, iterative synthesis, claim challenging, cited briefs |
-| `security-hardening` | OWASP Top 10 prevention, input validation, secrets management, npm audit triage |
+| `research` | Convergence-driven research with adversarial verification — tiered multi-engine search, iterative synthesis, claim challenging, cited briefs |
+| `security` | OWASP Top 10 prevention, input validation, secrets management, npm audit triage |
 | `debugging` | Systematic root-cause debugging — Stop-the-Line rule, 6-step triage checklist |
-| `api-design` | Contract-first API design, error semantics, REST patterns, validation at boundaries |
-| `git-workflow` | Trunk-based development, atomic commits, save-point pattern, git bisect |
+| `api-contracts` | Contract-first API design, error semantics, REST patterns, validation at boundaries |
+| `git` | Trunk-based development, atomic commits, save-point pattern, git bisect |
 | `performance` | Measurement-first optimization, Core Web Vitals, N+1 prevention, bundle budgets |
-| `frontend-ui` | Component architecture, accessibility (WCAG 2.1 AA), AI aesthetic anti-patterns |
-| `remove-dead-code` | Find and remove unused files, deps, exports via knip |
+| `react-engineering` | React component architecture, state management, file structure discipline |
+| `design-setup` | Design principles, anti-patterns, OKLCH color theory, typography — run `/design-setup teach` once per project |
+| `design-review` | Scored design quality audit (accessibility, theming, responsive, anti-patterns) with P0-P3 severity |
+| `design-polish` | Final-pass design refinement — alignment, spacing, interaction states, micro-details |
+| `design-typography` | Typography assessment and fixes — font selection, hierarchy, readability, scales |
+| `dead-code` | Find and remove unused files, deps, exports via knip |
 | `find-skills` | Discover and install skills from the ecosystem |
 | `skill-creator` | Guide for building new skills |
-| `triage-issue` | Investigate bugs, find root cause, create issue with TDD fix plan |
-| `prompt-master` | Generate optimized prompts for Claude Code agentic tasks |
-| `visualise` | Render inline interactive visuals — SVG diagrams, HTML widgets, charts |
+| `triage` | Investigate bugs, find root cause, create issue with TDD fix plan |
+| `prompt-craft` | Generate optimized prompts for Claude Code agentic tasks |
+| `diagram` | Render inline interactive visuals — SVG diagrams, HTML widgets, charts |
 | `electron-wrapper` | Wrap a web app into an Electron desktop app |
 
 ### Commands (user-invoked via `/`)
@@ -104,6 +108,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 |------|---------|---------|
 | `session-start.sh` | SessionStart | Brief workflow reminder injected at session start |
 | `compress-memory.sh` | PostToolUse → Write | Auto-compress prose in memory files (filler removal, phrase shortening). Preserves frontmatter, code, URLs, paths. Validates before writing, restores on corruption. |
+| `design-antipattern-check.sh` | PostToolUse → Edit/Write | Detects AI design anti-patterns (Inter font, purple gradients, side-stripe borders, gradient text, #000/#fff, HSL) in frontend files and warns inline |
 
 ### Config
 - `settings.json` — Permissions, hooks, extended thinking, plugins, statusline
@@ -134,3 +139,5 @@ All overwrites create timestamped backups in `~/.claude/backups/`.
 Skills originally ported from [brianlovin/agent-config](https://github.com/brianlovin/agent-config) and [mattpocock/skills](https://github.com/mattpocock/skills), renamed for clarity, reorganized into skills vs commands, and extended with custom rules.
 
 Security, debugging, API design, git workflow, performance, frontend UI, and shipping skills adapted from [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) — a production-grade engineering skills library for AI coding agents. Anti-rationalization tables and red flags patterns also drawn from that project.
+
+Design skills (`design-setup`, `design-review`, `design-polish`, `design-typography`) and the anti-pattern detection hook adapted from [pbakaus/impeccable](https://github.com/pbakaus/impeccable) (Apache 2.0) — a design skill system that teaches AI coding assistants real design principles.

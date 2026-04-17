@@ -13,7 +13,7 @@ Personal Claude Code configuration — skills, commands, rules, and settings, sy
 
 ## Structure
 
-- `skills/` — Auto-triggered by Claude when relevant (16 skills)
+- `skills/` — Auto-triggered by Claude when relevant (20 skills)
 - `commands/` — User-invoked via `/` in Claude Code (16 commands)
 - `rules/` — Always-on behavioral guidelines (11 rules)
 - `references/` — Supplementary checklists loaded on demand (security, accessibility)

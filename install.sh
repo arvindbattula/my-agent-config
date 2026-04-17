@@ -487,6 +487,37 @@ if $DRY_RUN; then
     echo -e "${YELLOW}(dry-run mode — no changes will be made)${NC}"
 fi
 
+# Clean up renamed skill directories from previous installs
+RENAMED_SKILLS=(
+    "frontend-ui:react-engineering"
+    "visualise:diagram"
+    "deep-research:research"
+    "prompt-master:prompt-craft"
+    "remove-dead-code:dead-code"
+    "security-hardening:security"
+    "triage-issue:triage"
+    "api-design:api-contracts"
+    "git-workflow:git"
+)
+
+for pair in "${RENAMED_SKILLS[@]}"; do
+    old="${pair%%:*}"
+    new="${pair##*:}"
+    old_dir="$CLAUDE_DIR/skills/$old"
+    if [ -d "$old_dir" ]; then
+        if $STATUS_ONLY; then
+            echo -e "  ${YELLOW}!${NC} $old ${GRAY}(renamed to $new, will be removed on sync)${NC}"
+        elif $DRY_RUN; then
+            echo -e "  ${YELLOW}!${NC} $old ${GRAY}→ would remove (renamed to $new)${NC}"
+        else
+            backup_file "$old_dir"
+            rm -rf "$old_dir"
+            echo -e "  ${YELLOW}!${NC} $old ${GRAY}→ removed (renamed to $new)${NC}"
+            ((actions_taken++))
+        fi
+    fi
+done
+
 # Sync each category
 sync_directories "Skills" "$REPO_DIR/skills" "$CLAUDE_DIR/skills"
 sync_files "Commands" "$REPO_DIR/commands" "$CLAUDE_DIR/commands"

@@ -1,5 +1,5 @@
 ---
-name: prompt-master
+name: prompt-craft
 version: 3.0.0
 description: Generates optimized prompts for Claude Code. Use when writing, fixing, improving, or structuring a prompt to give to Claude Code for agentic coding tasks.
 ---

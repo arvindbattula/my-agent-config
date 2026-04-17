@@ -1,6 +1,6 @@
 # Security Checklist
 
-Quick reference for web application security. Use alongside the `security-hardening` skill.
+Quick reference for web application security. Use alongside the `security` skill.
 
 ## Pre-Commit Checks
 

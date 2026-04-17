@@ -36,7 +36,7 @@ Run through each section. Check items that apply to this project — not every s
 - [ ] Security headers configured (CSP, HSTS, etc.)
 - [ ] CORS restricted to specific origins (not wildcard)
 
-See `security-hardening` skill and `references/security-checklist.md` for details.
+See `security` skill and `references/security-checklist.md` for details.
 
 **Performance** *(if user-facing):*
 - [ ] Core Web Vitals within "Good" thresholds (LCP ≤2.5s, INP ≤200ms, CLS ≤0.1)

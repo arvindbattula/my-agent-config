@@ -1,6 +1,6 @@
 # Accessibility Checklist
 
-WCAG 2.1 AA compliance checklist. Use alongside the `frontend-ui` skill.
+WCAG 2.1 AA compliance checklist. Use alongside the `react-engineering` skill.
 
 ## Keyboard Navigation
 

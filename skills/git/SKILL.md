@@ -1,5 +1,5 @@
 ---
-name: git-workflow
+name: git
 description: "Guides git commit discipline and branching strategy. Use when committing code, creating branches, writing commit messages, or managing version history. Use when changes are accumulating without commits, or when commit history needs to be clean for review."
 ---
 
