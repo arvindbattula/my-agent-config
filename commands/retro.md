@@ -172,9 +172,13 @@ Rules:
 
 Read `~/.claude/memory/discovery-blind-spots.md` (create if it doesn't exist).
 
-For each new pattern from Step 2:
-- If a similar blind spot already exists, update it with this new evidence (increment the "seen in" count)
-- If it's new, add it
+For each new pattern from Step 2, check for duplicates before writing:
+
+```bash
+~/.claude/bin/recall "<pattern name + one-line description>" --scope global --budget 600 --why
+```
+
+If recall returns a near-match, update the existing entry's "Seen in" count with this project's context instead of creating a duplicate. If recall returns nothing similar, add the new pattern.
 
 File format:
 ```markdown

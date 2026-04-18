@@ -26,7 +26,13 @@ List files in the auto-memory dir that were touched today:
 find ~/.claude/projects/<slug>/memory -type f -newermt "$(date +%Y-%m-%d)" 2>/dev/null
 ```
 
-Read the current `CLAUDE.md`, `docs/state.md` (if it exists), `docs/decisions.md` (if it exists). You will not re-save content already captured.
+Check whether the session's topics are already covered by existing memory:
+
+```bash
+~/.claude/bin/recall "<two or three topics from this session>" --scope current --budget 800
+```
+
+Read the current `CLAUDE.md`, `docs/state.md` (if it exists), `docs/decisions.md` (if it exists). You will not re-save content already captured or surfaced by recall.
 
 ### Step 2: Scan the session for candidates
 

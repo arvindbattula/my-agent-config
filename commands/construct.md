@@ -51,9 +51,12 @@ find . -name "*.test.*" -o -name "*.spec.*" 2>/dev/null | head -10
 
 # How much has changed since last session?
 git diff --stat HEAD~1 2>/dev/null || echo "No git history"
+
+# What prior memory is relevant to this phase?
+~/.claude/bin/recall "<phase name + one-line build description>" --budget 1500
 ```
 
-Use these results to calibrate Step 2 — skip full file reads if orientation shows nothing has changed.
+Use these results to calibrate Step 2 — skip full file reads if orientation shows nothing has changed. If recall surfaces relevant prior learnings, read them before touching code.
 
 ### Step 2: Assess current state
 

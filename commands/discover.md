@@ -9,9 +9,15 @@ Structured product discovery interview. Guides the user from a fuzzy idea to a c
 
 ## Before Starting
 
-Read `~/.claude/memory/discovery-blind-spots.md` if it exists. This file contains patterns of things missed in past projects. Use these to add targeted probing questions during the interview — weave them into the relevant layer naturally, don't dump them as a separate section.
+Ask the user for a one-line description of the idea first. Then run:
 
-Read `~/.claude/projects/-Users-arvindbattula/memory/engineering_patterns.md` if it exists. Use validated patterns to inform technical recommendations during Layer 5 (Technical Shape) — e.g., if a tech choice has been validated across multiple projects, recommend it with confidence.
+```bash
+~/.claude/bin/recall "<user's one-line idea>" --budget 2500
+```
+
+This surfaces relevant entries from `discovery-blind-spots.md` (past blind spots to probe for), `engineering_patterns.md` (validated tech choices to recommend in Layer 5), and any prior project memory touching the same problem space. Weave blind-spot probes into the relevant layer naturally — don't dump them as a separate section. Cite validated patterns with confidence during Layer 5.
+
+If recall returns nothing useful, fall back to reading `~/.claude/memory/discovery-blind-spots.md` and `~/.claude/projects/-Users-arvindbattula/memory/engineering_patterns.md` wholesale.
 
 ## Process
 
