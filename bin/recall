@@ -91,6 +91,40 @@ def tok(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _stem(token: str) -> str:
+    """Minimal suffix stripper. Applied to both query and corpus, so exact
+    reversibility doesn't matter — what matters is that variants collide.
+
+    Handles: plurals (ies/sses/s), past tense (ed), gerunds (ing). Does NOT
+    attempt Porter-style vowel/consonant rules, so some morphological
+    variants won't collide (e.g., 'configure' vs 'configured'). That's an
+    acceptable floor for a 2000-line corpus — revisit if miss-rate
+    becomes observable.
+    """
+    n = len(token)
+    if n > 4 and token.endswith("ing"):
+        return token[:-3]
+    if n > 3 and token.endswith("ed") and not token.endswith("eed"):
+        return token[:-2]
+    if n > 3 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if n > 3 and token.endswith("sses"):
+        return token[:-2]
+    # Strip trailing 's' for plurals. Carve out 'ss' (pass, class) and 'us'
+    # (status, virus, bonus) because those are never plurals. We do NOT
+    # carve out 'is' — that would block 'apis' → 'api', which is exactly
+    # the reviewer's failure case. Cost is 'analysis'/'basis' stemming to
+    # 'analysi'/'basi', which is fine because both forms stem identically.
+    if (
+        n > 3
+        and token.endswith("s")
+        and not token.endswith("ss")
+        and not token.endswith("us")
+    ):
+        return token[:-1]
+    return token
+
+
 # ─── Document model ─────────────────────────────────────────────────────────
 
 @dataclass
@@ -111,8 +145,14 @@ class Doc:
 
 
 def tokenize(text: str) -> List[str]:
-    return [t for t in TOKEN_RE.findall(text.lower())
-            if len(t) >= 2 and t not in STOPWORDS]
+    out: List[str] = []
+    for raw in TOKEN_RE.findall(text.lower()):
+        if len(raw) < 2 or raw in STOPWORDS:
+            continue
+        s = _stem(raw)
+        if len(s) >= 2 and s not in STOPWORDS:
+            out.append(s)
+    return out
 
 
 def tag_multiplier(filename: str) -> float:
@@ -129,39 +169,62 @@ def recency_multiplier(path: Path) -> float:
         age_days = (time.time() - path.stat().st_mtime) / 86400.0
     except OSError:
         return 1.0
+    # Clamp negative ages (future mtimes from git checkout, rsync, clock
+    # skew, etc.) so they can't exceed 1.0 and bury real results.
+    age_days = max(0.0, age_days)
     # 2^(-age/half_life): 1.0 fresh, 0.5 at half-life, 0.25 at 2× half-life
     return math.pow(2.0, -age_days / HALF_LIFE_DAYS)
 
 
-def split_into_sections(content: str) -> List[Tuple[str, str]]:
-    """Split on lines starting with `## ` (level-2 headings).
+# Fallback block size when a large file has no `## ` headings
+FALLBACK_BLOCK_LINES = 40
 
-    Returns [(section_title, section_text), ...]. The pre-heading preamble is
-    returned with title "intro" if non-empty.
+
+def split_into_sections(content: str) -> List[Tuple[str, str]]:
+    """Split a large file into retrievable chunks.
+
+    Primary: split on `## ` (level-2 headings). Level-1 is document title,
+    level-3+ is too granular and corrupts BM25 avgdl.
+
+    Fallback: if the file has no level-2 headings, split into fixed
+    FALLBACK_BLOCK_LINES blocks so giant unstructured files can't bypass
+    chunking and blow the budget.
+
+    Returns [(section_title, section_text), ...].
     """
     lines = content.splitlines(keepends=True)
-    sections: List[Tuple[str, str]] = []
-    current_title: Optional[str] = None
-    current_buf: List[str] = []
+    has_level2 = any(line.startswith("## ") for line in lines)
 
-    def flush():
-        if not current_buf:
-            return
-        text = "".join(current_buf).strip("\n")
+    if has_level2:
+        sections: List[Tuple[str, str]] = []
+        current_title: Optional[str] = None
+        current_buf: List[str] = []
+
+        def flush():
+            if not current_buf:
+                return
+            text = "".join(current_buf).strip("\n")
+            if text:
+                title = current_title if current_title else "intro"
+                sections.append((title, text))
+
+        for line in lines:
+            if line.startswith("## "):
+                flush()
+                current_title = line[3:].strip()
+                current_buf = [line]
+            else:
+                current_buf.append(line)
+        flush()
+        return sections
+
+    # Fallback: fixed-size blocks
+    blocks: List[Tuple[str, str]] = []
+    for i in range(0, len(lines), FALLBACK_BLOCK_LINES):
+        text = "".join(lines[i:i + FALLBACK_BLOCK_LINES]).strip("\n")
         if text:
-            title = current_title if current_title else "intro"
-            sections.append((title, text))
-
-    for line in lines:
-        if line.startswith("## "):
-            flush()
-            current_title = line[3:].strip()
-            current_buf = [line]
-        else:
-            current_buf.append(line)
-    flush()
-
-    return sections
+            blocks.append((f"block {i // FALLBACK_BLOCK_LINES + 1}", text))
+    return blocks
 
 
 def load_docs_from_dir(mem_dir: Path, scope: str) -> List[Doc]:
@@ -180,8 +243,11 @@ def load_docs_from_dir(mem_dir: Path, scope: str) -> List[Doc]:
 
         line_count = content.count("\n") + 1
         if line_count >= SECTION_CHUNK_LINES:
-            for title, text in split_into_sections(content):
-                full_title = f"{path.name} § {title}" if title != "intro" else path.name
+            for idx, (title, text) in enumerate(split_into_sections(content)):
+                if title == "intro" and idx == 0:
+                    full_title = path.name
+                else:
+                    full_title = f"{path.name} § {title} [{idx}]"
                 doc = Doc(path=path, scope=scope, title=full_title, content=text)
                 doc.tokens = tokenize(text)
                 doc.length = len(doc.tokens)
@@ -197,29 +263,35 @@ def load_docs_from_dir(mem_dir: Path, scope: str) -> List[Doc]:
 
 
 def gather_docs(scope: str) -> List[Doc]:
-    """Assemble the corpus for the requested scope."""
+    """Assemble the corpus for the requested scope.
+
+    Dedup is done at the scope-directory level (by resolved absolute path)
+    so that scopes pointing to the same dir (e.g., user == current when
+    invoked from $HOME) don't double-load, and so that sections of one
+    file with duplicate heading names aren't collapsed against each other.
+    """
     project_dir = CLAUDE_DIR / "projects" / _slug(_git_root_or_cwd()) / "memory"
-    docs: List[Doc] = []
 
+    candidates: List[Tuple[str, Path]] = []
     if scope in ("global", "all"):
-        docs.extend(load_docs_from_dir(GLOBAL_MEM_DIR, "global"))
+        candidates.append(("global", GLOBAL_MEM_DIR))
     if scope in ("user", "all"):
-        docs.extend(load_docs_from_dir(USER_MEM_DIR, "user"))
+        candidates.append(("user", USER_MEM_DIR))
     if scope in ("current", "all"):
-        project_scope = f"project:{project_dir.parent.name}"
-        docs.extend(load_docs_from_dir(project_dir, project_scope))
+        candidates.append((f"project:{project_dir.parent.name}", project_dir))
 
-    # Dedup by absolute path + title (user scope may equal cwd scope when
-    # invoked from $HOME)
-    seen = set()
-    unique: List[Doc] = []
-    for d in docs:
-        key = (str(d.path.resolve()), d.title)
-        if key in seen:
+    seen_dirs = set()
+    docs: List[Doc] = []
+    for label, d in candidates:
+        try:
+            resolved = d.resolve()
+        except OSError:
             continue
-        seen.add(key)
-        unique.append(d)
-    return unique
+        if resolved in seen_dirs:
+            continue
+        seen_dirs.add(resolved)
+        docs.extend(load_docs_from_dir(d, label))
+    return docs
 
 
 # ─── BM25 ───────────────────────────────────────────────────────────────────
@@ -263,6 +335,59 @@ def score_bm25(docs: List[Doc], query_terms: List[str]) -> None:
 
 # ─── Packing and output ─────────────────────────────────────────────────────
 
+def _extract_match_window(content: str, matched_terms: List[str], max_chars: int) -> str:
+    """Truncate content by extracting a window of lines centered on the
+    highest-density match line, rather than blindly taking the first
+    max_chars. Preserves the context BM25 actually scored high for.
+    """
+    if max_chars <= 0:
+        return ""
+    if len(content) <= max_chars:
+        return content
+
+    lines = content.splitlines()
+    if not lines:
+        return content[:max_chars]
+
+    # If no match info, fall back to prefix truncation with ellipsis marker
+    if not matched_terms:
+        return content[:max_chars].rstrip() + "\n\n... (truncated)"
+
+    # Stems were the units that matched BM25; search them as substrings so
+    # morphological variants (configure/configured/configuring) all count
+    lc_terms = [t.lower() for t in matched_terms]
+    line_hits = []
+    for line in lines:
+        line_lc = line.lower()
+        line_hits.append(sum(line_lc.count(t) for t in lc_terms))
+
+    if sum(line_hits) == 0:
+        return content[:max_chars].rstrip() + "\n\n... (truncated)"
+
+    # Center on the densest line
+    center = max(range(len(lines)), key=lambda i: line_hits[i])
+
+    # Expand outward until budget exhausted
+    start = end = center
+    acc = len(lines[center]) + 1
+    while acc < max_chars:
+        expanded = False
+        if start > 0 and acc + len(lines[start - 1]) + 1 <= max_chars:
+            start -= 1
+            acc += len(lines[start]) + 1
+            expanded = True
+        if end < len(lines) - 1 and acc + len(lines[end + 1]) + 1 <= max_chars:
+            end += 1
+            acc += len(lines[end]) + 1
+            expanded = True
+        if not expanded:
+            break
+
+    prefix = "... (earlier content truncated)\n\n" if start > 0 else ""
+    suffix = "\n\n... (later content truncated)" if end < len(lines) - 1 else ""
+    return prefix + "\n".join(lines[start:end + 1]) + suffix
+
+
 def pack_results(docs: List[Doc], budget: int, limit: Optional[int]) -> Tuple[List[Doc], int, int]:
     """Greedy fill by descending score. Returns (included, used_tokens, omitted_count)."""
     ranked = [d for d in docs if d.score > 0]
@@ -275,10 +400,10 @@ def pack_results(docs: List[Doc], budget: int, limit: Optional[int]) -> Tuple[Li
             break
         cost = tok(d.content) + 80  # ~80 tokens of header/framing overhead
         if used + cost > budget:
-            # Special case: first result would exceed budget → include truncated
+            # Top-ranked doc alone exceeds budget: keep it, truncate around matches
             if not included and cost > budget:
                 keep_chars = max(200, (budget - 80) * 4)
-                d.content = d.content[:keep_chars].rstrip() + "\n\n... (truncated to fit budget)"
+                d.content = _extract_match_window(d.content, d.matched_terms, keep_chars)
                 included.append(d)
                 used += tok(d.content) + 80
             continue
