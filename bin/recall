@@ -18,13 +18,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import Any, List, Dict, Tuple, Optional
 
 
 # ─── Config ─────────────────────────────────────────────────────────────────
@@ -76,6 +77,12 @@ SECTION_CHUNK_LINES = 60
 
 # Skip these files — noise for recall
 SKIP_FILES = {"MEMORY.md"}
+
+# Manifest cache. Bump CACHE_VERSION when tokenization or chunking rules
+# change so cached entries from older rules get discarded automatically.
+CACHE_VERSION = 1
+CACHE_DIR = CLAUDE_DIR / "cache" / "recall"
+CACHE_FILE = CACHE_DIR / "manifest.json"
 
 # Minimal English stoplist. Keep small — BM25's IDF already dampens common terms.
 STOPWORDS = set(
@@ -129,13 +136,18 @@ def _stem(token: str) -> str:
 
 @dataclass
 class Doc:
-    """A single retrievable unit — whole file or a section of a large file."""
+    """A single retrievable unit — whole file or a section of a large file.
+
+    Content is loaded lazily (empty until pack_results reaches the doc)
+    so the cache-hit path doesn't read files we don't end up rendering.
+    """
     path: Path
     scope: str                  # "global" | "user" | "project:<slug>"
-    title: str                  # filename or "filename § section"
-    content: str                # raw markdown content
+    title: str                  # filename or "filename § section [idx]"
+    content: str = ""           # raw markdown, loaded lazily
     tokens: List[str] = field(default_factory=list)
     length: int = 0             # len(tokens), cached
+    chunk_idx: Optional[int] = None  # None = whole file; int = section index
     # Scoring intermediates (populated during scoring)
     bm25: float = 0.0
     tag_mult: float = 1.0
@@ -227,42 +239,170 @@ def split_into_sections(content: str) -> List[Tuple[str, str]]:
     return blocks
 
 
-def load_docs_from_dir(mem_dir: Path, scope: str) -> List[Doc]:
+def _chunks_for_file(path: Path, content: str) -> List[Dict[str, Any]]:
+    """Produce serializable chunk dicts for manifest storage.
+
+    Each chunk: {title, tokens, length, chunk_idx}. chunk_idx is None for
+    whole-file docs; an integer for section splits so lazy content loading
+    can re-split and extract the right section deterministically.
+    """
+    chunks: List[Dict[str, Any]] = []
+    line_count = content.count("\n") + 1
+    if line_count >= SECTION_CHUNK_LINES:
+        for idx, (title, text) in enumerate(split_into_sections(content)):
+            if title == "intro" and idx == 0:
+                full_title = path.name
+            else:
+                full_title = f"{path.name} § {title} [{idx}]"
+            tokens = tokenize(text)
+            if not tokens:
+                continue
+            chunks.append({
+                "title": full_title,
+                "tokens": tokens,
+                "length": len(tokens),
+                "chunk_idx": idx,
+            })
+    else:
+        tokens = tokenize(content)
+        if tokens:
+            chunks.append({
+                "title": path.name,
+                "tokens": tokens,
+                "length": len(tokens),
+                "chunk_idx": None,
+            })
+    return chunks
+
+
+def _docs_from_chunks(path: Path, scope: str, chunks: List[Dict[str, Any]]) -> List[Doc]:
+    out: List[Doc] = []
+    for c in chunks:
+        out.append(Doc(
+            path=path,
+            scope=scope,
+            title=c["title"],
+            content="",  # lazy
+            tokens=list(c["tokens"]),
+            length=int(c["length"]),
+            chunk_idx=c.get("chunk_idx"),
+        ))
+    return out
+
+
+def load_docs_from_dir(mem_dir: Path, scope: str, manifest: Dict[str, Any]) -> List[Doc]:
+    """Enumerate .md files in mem_dir, using the manifest for cache hits and
+    re-tokenizing only changed/new files. Prunes manifest entries for files
+    that have disappeared from this directory.
+    """
     if not mem_dir.is_dir():
         return []
+
+    try:
+        dir_resolved = str(mem_dir.resolve())
+    except OSError:
+        return []
+
     docs: List[Doc] = []
+    current_keys: set = set()
+    files_map: Dict[str, Dict[str, Any]] = manifest.setdefault("files", {})
+
     for path in sorted(mem_dir.glob("*.md")):
         if path.name in SKIP_FILES:
             continue
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        abs_key = str(path.resolve())
+        current_keys.add(abs_key)
+
+        cached = files_map.get(abs_key)
+        if cached and cached.get("mtime") == st.st_mtime and "chunks" in cached:
+            docs.extend(_docs_from_chunks(path, scope, cached["chunks"]))
+            continue
+
+        # Cache miss — read + tokenize, update manifest
         try:
             content = path.read_text(encoding="utf-8")
         except OSError:
             continue
         if not content.strip():
+            files_map.pop(abs_key, None)
             continue
 
-        line_count = content.count("\n") + 1
-        if line_count >= SECTION_CHUNK_LINES:
-            for idx, (title, text) in enumerate(split_into_sections(content)):
-                if title == "intro" and idx == 0:
-                    full_title = path.name
-                else:
-                    full_title = f"{path.name} § {title} [{idx}]"
-                doc = Doc(path=path, scope=scope, title=full_title, content=text)
-                doc.tokens = tokenize(text)
-                doc.length = len(doc.tokens)
-                if doc.length > 0:
-                    docs.append(doc)
-        else:
-            doc = Doc(path=path, scope=scope, title=path.name, content=content)
-            doc.tokens = tokenize(content)
-            doc.length = len(doc.tokens)
-            if doc.length > 0:
-                docs.append(doc)
+        chunks = _chunks_for_file(path, content)
+        if not chunks:
+            files_map.pop(abs_key, None)
+            continue
+        files_map[abs_key] = {
+            "mtime": st.st_mtime,
+            "scope": scope,
+            "chunks": chunks,
+        }
+        docs.extend(_docs_from_chunks(path, scope, chunks))
+
+    # Prune stale entries that used to live in this dir but no longer do
+    stale = [
+        k for k in list(files_map.keys())
+        if k.startswith(dir_resolved + "/") and k not in current_keys
+    ]
+    for k in stale:
+        del files_map[k]
+
     return docs
 
 
-def gather_docs(scope: str) -> List[Doc]:
+def _load_content_for_doc(doc: Doc) -> str:
+    """Lazily load the content of a Doc from disk. For section docs,
+    re-split the parent file and return the chunk matching chunk_idx.
+    """
+    try:
+        content = doc.path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if doc.chunk_idx is None:
+        return content
+    line_count = content.count("\n") + 1
+    if line_count < SECTION_CHUNK_LINES:
+        # File shrunk below chunking threshold since cache was built;
+        # return the whole file rather than fail
+        return content
+    sections = split_into_sections(content)
+    if 0 <= doc.chunk_idx < len(sections):
+        return sections[doc.chunk_idx][1]
+    return content  # fallback — section index no longer valid
+
+
+def load_manifest() -> Dict[str, Any]:
+    """Read manifest JSON. Any read/parse failure or version mismatch
+    yields an empty manifest — we'd rather rebuild than use stale data.
+    """
+    try:
+        with CACHE_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("version") == CACHE_VERSION and isinstance(data.get("files"), dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"version": CACHE_VERSION, "files": {}}
+
+
+def save_manifest(manifest: Dict[str, Any]) -> None:
+    """Atomic write via tmp + replace. Silent fallback on OSError so a
+    read-only cache dir doesn't break the tool (correctness > performance).
+    """
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE_FILE.with_suffix(".json.tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(manifest, f, separators=(",", ":"))
+        tmp.replace(CACHE_FILE)
+    except OSError:
+        return
+
+
+def gather_docs(scope: str, manifest: Dict[str, Any]) -> List[Doc]:
     """Assemble the corpus for the requested scope.
 
     Dedup is done at the scope-directory level (by resolved absolute path)
@@ -290,7 +430,7 @@ def gather_docs(scope: str) -> List[Doc]:
         if resolved in seen_dirs:
             continue
         seen_dirs.add(resolved)
-        docs.extend(load_docs_from_dir(d, label))
+        docs.extend(load_docs_from_dir(d, label, manifest))
     return docs
 
 
@@ -398,6 +538,11 @@ def pack_results(docs: List[Doc], budget: int, limit: Optional[int]) -> Tuple[Li
     for d in ranked:
         if limit is not None and len(included) >= limit:
             break
+        # Lazy content load: only top-ranked docs pay the I/O cost
+        if not d.content:
+            d.content = _load_content_for_doc(d)
+        if not d.content:
+            continue  # file disappeared or unreadable between scoring and render
         cost = tok(d.content) + 80  # ~80 tokens of header/framing overhead
         if used + cost > budget:
             # Top-ranked doc alone exceeds budget: keep it, truncate around matches
@@ -458,14 +603,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Which memory roots to search (default: all).",
     )
     parser.add_argument("--why", action="store_true", help="Show score breakdown per result.")
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="Force rebuild of the tokenization cache (drops manifest before scan).",
+    )
     args = parser.parse_args(argv)
+
+    if args.reindex:
+        try:
+            CACHE_FILE.unlink()
+        except OSError:
+            pass
 
     query_terms = tokenize(args.query)
     if not query_terms:
         print(f'## Recall: "{args.query}"\n\n_Query has no searchable terms._\n')
         return 0
 
-    docs = gather_docs(args.scope)
+    manifest = load_manifest()
+    docs = gather_docs(args.scope, manifest)
+    save_manifest(manifest)  # persist any updates from cache misses / prunes
+
     if not docs:
         print(f'## Recall: "{args.query}"\n\n_Memory corpus is empty for scope: {args.scope}._\n')
         return 0
