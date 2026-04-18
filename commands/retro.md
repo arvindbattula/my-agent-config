@@ -7,8 +7,8 @@ Project retrospective that reviews how well you thought about the problem upfron
 
 ## Prerequisites
 
-Read these files:
-- `docs/spec.md` — what we said we'd build (required)
+Read whichever of these exist (none are strictly required):
+- `docs/spec.md` — what we said we'd build (preferred anchor for Step 1)
 - `docs/plan.md` — how we said we'd build it
 - `docs/learnings.md` — what surprised us
 - `docs/decisions.md` — choices made along the way
@@ -16,11 +16,20 @@ Read these files:
 
 Also read the codebase to understand what was actually built.
 
-If `docs/spec.md` doesn't exist or is empty, this command isn't useful — tell the user.
+Step 1 adapts to what's available:
+- If `docs/spec.md` exists → run Step 1a (full Spec vs. Reality audit).
+- If not → run Step 1b (lighter archaeological pass against CLAUDE.md,
+  git log for fix/revert/bug commits, any review comments or
+  post-mortems, and the codebase). Patterns from 1b carry softer
+  evidence; tag them accordingly in Step 2 so future `/discover` calls
+  can weigh them.
+
+If none of CLAUDE.md, git history, memory, or the codebase is available,
+stop — there's nothing to retro against. Tell the user.
 
 ## Process
 
-### Step 1: Spec vs. Reality Audit
+### Step 1a: Spec vs. Reality Audit (when `docs/spec.md` exists)
 
 Compare what was specified against what was actually built. Identify three categories:
 
@@ -35,6 +44,21 @@ Compare what was specified against what was actually built. Identify three categ
 
 Present these findings to the user. Ask: "Does this match your experience? Anything else that surprised you during this project?"
 
+### Step 1b: Archaeological Audit (when `docs/spec.md` is absent)
+
+Reconstruct the "what was intended vs. what was built" gap from whatever sources exist. Identify three categories, same shape as 1a:
+
+**Built but not stated** — features or behaviors in the code that `CLAUDE.md` or the README never mention. Look at top-level modules, route handlers, major UI surfaces, and CLI subcommands.
+- For each: was this an intentional expansion or drift? What would have surfaced it as a decision point upfront?
+
+**Unexpected issues** — pain visible in git history or reviews. Scan commit messages for `fix:`, `revert:`, `hotfix`, `bug`, and read any review comments, post-mortems, or issue threads.
+- For each: which category of discovery question would have pre-empted this? (data lifecycle, error states, external API limits, auth boundaries, etc.)
+
+**Forced mid-build decisions** — choices visible in commit messages or `decisions.md` (if it exists) that look reactive rather than deliberate. Look for commits that revise an earlier approach, add a config escape hatch, or introduce a workaround.
+- For each: what did the team learn at that moment that they could have known earlier?
+
+Present findings. Ask: "This is a reconstruction from code and history rather than a spec comparison. Does this match your memory of what went off-plan?" Respect corrections — the user's memory trumps git log here.
+
 ### Step 2: Extract blind spot patterns
 
 From the audit, distill 2-5 **blind spot patterns**. These are recurring categories of things that tend to get missed during discovery. Frame them as question types, not project-specific details.
@@ -45,7 +69,10 @@ Format:
 Missed: [what was missed in this project]
 Root cause: [why it was missed — wrong assumption, didn't ask, didn't know to ask]
 Discovery question to add: [the specific question that would catch this in future projects]
+Evidence source: spec-audit | archaeological | external-review
 ```
+
+The `Evidence source` field records where the pattern came from. `spec-audit` is the strongest (direct spec-vs-reality delta from Step 1a). `archaeological` is inferred from git log / codebase without a spec (Step 1b) — softer, needs more corroboration before it validates. `external-review` came from review comments or post-mortems — strong but indirect. Future `/discover` calls and this command's Step 5 use the field to weigh patterns; the 3-project validation threshold in Step 5 still applies.
 
 Examples of what patterns look like:
 - "Error state design" — you specified the happy path but not what users see when things fail
