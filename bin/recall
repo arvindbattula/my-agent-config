@@ -1,0 +1,361 @@
+#!/usr/bin/env python3
+"""
+recall — ranked query-time retrieval over the Claude memory corpus.
+
+Scans three roots:
+  - ~/.claude/memory/                                (global)
+  - ~/.claude/projects/<home-slug>/memory/           (user-scoped)
+  - ~/.claude/projects/<cwd-slug>/memory/            (current project)
+
+Ranks files (or sections of large files) by BM25, weighted by tag type
+(via filename prefix) and recency (180-day half-life). Packs top results
+into a markdown output within a token budget.
+
+Usage:
+    recall "<query>" [--budget N] [--limit N] [--scope S] [--why]
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import re
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+
+
+# ─── Config ─────────────────────────────────────────────────────────────────
+
+CLAUDE_DIR = Path.home() / ".claude"
+GLOBAL_MEM_DIR = CLAUDE_DIR / "memory"
+
+# Claude Code's project slug rule: absolute path with "/" → "-"
+def _slug(p: Path) -> str:
+    return str(p).replace("/", "-")
+
+USER_MEM_DIR = CLAUDE_DIR / "projects" / _slug(Path.home()) / "memory"
+
+
+def _git_root_or_cwd() -> Path:
+    """Walk up from CWD to find a git repo root. Fall back to CWD if none.
+
+    Claude Code derives the project memory dir from the git repo, so subdirs
+    of the same repo share one memory store. `.git` may be a dir (normal) or
+    a file (worktrees, submodules); `.exists()` handles both.
+    """
+    cwd = Path.cwd()
+    for d in [cwd, *cwd.parents]:
+        if (d / ".git").exists():
+            return d
+    return cwd
+
+# BM25 parameters (Robertson defaults)
+K1 = 1.5
+B = 0.75
+
+# Recency half-life
+HALF_LIFE_DAYS = 180.0
+
+# Tag multipliers. Exact-name entries take precedence over prefix entries.
+TAG_MULTIPLIERS_EXACT: Dict[str, float] = {
+    "engineering_patterns.md": 1.3,
+    "discovery-blind-spots.md": 1.2,
+}
+TAG_MULTIPLIERS_PREFIX: Dict[str, float] = {
+    "reference_": 1.2,
+    "feedback_": 1.1,
+    "project_": 1.0,
+    "user_": 1.0,
+}
+
+# Split files with >= this many lines into sections on `## ` headings
+SECTION_CHUNK_LINES = 60
+
+# Skip these files — noise for recall
+SKIP_FILES = {"MEMORY.md"}
+
+# Minimal English stoplist. Keep small — BM25's IDF already dampens common terms.
+STOPWORDS = set(
+    "a an the and or of to in on for with by at from is are was were be been "
+    "this that these those it its as if but not no do does did has have had "
+    "we you they i our your their them".split()
+)
+
+TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# Char-to-token heuristic (OpenAI rule of thumb)
+def tok(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+# ─── Document model ─────────────────────────────────────────────────────────
+
+@dataclass
+class Doc:
+    """A single retrievable unit — whole file or a section of a large file."""
+    path: Path
+    scope: str                  # "global" | "user" | "project:<slug>"
+    title: str                  # filename or "filename § section"
+    content: str                # raw markdown content
+    tokens: List[str] = field(default_factory=list)
+    length: int = 0             # len(tokens), cached
+    # Scoring intermediates (populated during scoring)
+    bm25: float = 0.0
+    tag_mult: float = 1.0
+    recency_mult: float = 1.0
+    score: float = 0.0
+    matched_terms: List[str] = field(default_factory=list)
+
+
+def tokenize(text: str) -> List[str]:
+    return [t for t in TOKEN_RE.findall(text.lower())
+            if len(t) >= 2 and t not in STOPWORDS]
+
+
+def tag_multiplier(filename: str) -> float:
+    if filename in TAG_MULTIPLIERS_EXACT:
+        return TAG_MULTIPLIERS_EXACT[filename]
+    for prefix, mult in TAG_MULTIPLIERS_PREFIX.items():
+        if filename.startswith(prefix):
+            return mult
+    return 1.0
+
+
+def recency_multiplier(path: Path) -> float:
+    try:
+        age_days = (time.time() - path.stat().st_mtime) / 86400.0
+    except OSError:
+        return 1.0
+    # 2^(-age/half_life): 1.0 fresh, 0.5 at half-life, 0.25 at 2× half-life
+    return math.pow(2.0, -age_days / HALF_LIFE_DAYS)
+
+
+def split_into_sections(content: str) -> List[Tuple[str, str]]:
+    """Split on lines starting with `## ` (level-2 headings).
+
+    Returns [(section_title, section_text), ...]. The pre-heading preamble is
+    returned with title "intro" if non-empty.
+    """
+    lines = content.splitlines(keepends=True)
+    sections: List[Tuple[str, str]] = []
+    current_title: Optional[str] = None
+    current_buf: List[str] = []
+
+    def flush():
+        if not current_buf:
+            return
+        text = "".join(current_buf).strip("\n")
+        if text:
+            title = current_title if current_title else "intro"
+            sections.append((title, text))
+
+    for line in lines:
+        if line.startswith("## "):
+            flush()
+            current_title = line[3:].strip()
+            current_buf = [line]
+        else:
+            current_buf.append(line)
+    flush()
+
+    return sections
+
+
+def load_docs_from_dir(mem_dir: Path, scope: str) -> List[Doc]:
+    if not mem_dir.is_dir():
+        return []
+    docs: List[Doc] = []
+    for path in sorted(mem_dir.glob("*.md")):
+        if path.name in SKIP_FILES:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if not content.strip():
+            continue
+
+        line_count = content.count("\n") + 1
+        if line_count >= SECTION_CHUNK_LINES:
+            for title, text in split_into_sections(content):
+                full_title = f"{path.name} § {title}" if title != "intro" else path.name
+                doc = Doc(path=path, scope=scope, title=full_title, content=text)
+                doc.tokens = tokenize(text)
+                doc.length = len(doc.tokens)
+                if doc.length > 0:
+                    docs.append(doc)
+        else:
+            doc = Doc(path=path, scope=scope, title=path.name, content=content)
+            doc.tokens = tokenize(content)
+            doc.length = len(doc.tokens)
+            if doc.length > 0:
+                docs.append(doc)
+    return docs
+
+
+def gather_docs(scope: str) -> List[Doc]:
+    """Assemble the corpus for the requested scope."""
+    project_dir = CLAUDE_DIR / "projects" / _slug(_git_root_or_cwd()) / "memory"
+    docs: List[Doc] = []
+
+    if scope in ("global", "all"):
+        docs.extend(load_docs_from_dir(GLOBAL_MEM_DIR, "global"))
+    if scope in ("user", "all"):
+        docs.extend(load_docs_from_dir(USER_MEM_DIR, "user"))
+    if scope in ("current", "all"):
+        project_scope = f"project:{project_dir.parent.name}"
+        docs.extend(load_docs_from_dir(project_dir, project_scope))
+
+    # Dedup by absolute path + title (user scope may equal cwd scope when
+    # invoked from $HOME)
+    seen = set()
+    unique: List[Doc] = []
+    for d in docs:
+        key = (str(d.path.resolve()), d.title)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(d)
+    return unique
+
+
+# ─── BM25 ───────────────────────────────────────────────────────────────────
+
+def score_bm25(docs: List[Doc], query_terms: List[str]) -> None:
+    """Populate doc.bm25 and doc.matched_terms in place."""
+    if not docs or not query_terms:
+        return
+
+    N = len(docs)
+    avgdl = sum(d.length for d in docs) / N if N else 1.0
+
+    # Document frequency per query term
+    df: Dict[str, int] = {}
+    for term in set(query_terms):
+        df[term] = sum(1 for d in docs if term in d.tokens)
+
+    # IDF per term (BM25+ smoothing variant: +1 inside log keeps IDF >= 0)
+    idf: Dict[str, float] = {}
+    for term, n in df.items():
+        idf[term] = math.log(((N - n + 0.5) / (n + 0.5)) + 1.0)
+
+    for d in docs:
+        # Term frequencies in this doc
+        tf: Dict[str, int] = {}
+        for t in d.tokens:
+            if t in idf:
+                tf[t] = tf.get(t, 0) + 1
+
+        score = 0.0
+        matched: List[str] = []
+        for term, f in tf.items():
+            denom = f + K1 * (1 - B + B * d.length / avgdl)
+            contrib = idf[term] * (f * (K1 + 1)) / denom
+            if contrib > 0:
+                score += contrib
+                matched.append(term)
+        d.bm25 = score
+        d.matched_terms = matched
+
+
+# ─── Packing and output ─────────────────────────────────────────────────────
+
+def pack_results(docs: List[Doc], budget: int, limit: Optional[int]) -> Tuple[List[Doc], int, int]:
+    """Greedy fill by descending score. Returns (included, used_tokens, omitted_count)."""
+    ranked = [d for d in docs if d.score > 0]
+    ranked.sort(key=lambda d: d.score, reverse=True)
+
+    included: List[Doc] = []
+    used = 0
+    for d in ranked:
+        if limit is not None and len(included) >= limit:
+            break
+        cost = tok(d.content) + 80  # ~80 tokens of header/framing overhead
+        if used + cost > budget:
+            # Special case: first result would exceed budget → include truncated
+            if not included and cost > budget:
+                keep_chars = max(200, (budget - 80) * 4)
+                d.content = d.content[:keep_chars].rstrip() + "\n\n... (truncated to fit budget)"
+                included.append(d)
+                used += tok(d.content) + 80
+            continue
+        included.append(d)
+        used += cost
+    omitted = len(ranked) - len(included)
+    return included, used, omitted
+
+
+def render_markdown(
+    query: str,
+    results: List[Doc],
+    used: int,
+    budget: int,
+    omitted: int,
+    why: bool,
+) -> str:
+    header = f'## Recall: "{query}" (budget {budget}, used {used})\n'
+    if not results:
+        return header + "\n_No matches._\n"
+
+    out = [header]
+    for d in results:
+        meta = f"[{d.scope}, score {d.score:.2f}]"
+        out.append(f"\n### {d.title} {meta}\n")
+        if why:
+            breakdown = (
+                f"*matched: {', '.join(sorted(set(d.matched_terms))) or '—'} | "
+                f"bm25 {d.bm25:.2f} × tag {d.tag_mult:.2f} × recency {d.recency_mult:.2f}*\n"
+            )
+            out.append(breakdown)
+        out.append(d.content.rstrip() + "\n")
+    if omitted > 0:
+        out.append(f"\n---\n_{omitted} more result(s) omitted (would exceed budget)._\n")
+    return "".join(out)
+
+
+# ─── Main ───────────────────────────────────────────────────────────────────
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="recall",
+        description="Ranked query-time retrieval over the Claude memory corpus.",
+    )
+    parser.add_argument("query", help="Query string (plain text).")
+    parser.add_argument("--budget", type=int, default=1500, help="Token budget (default: 1500).")
+    parser.add_argument("--limit", type=int, default=None, help="Max number of results.")
+    parser.add_argument(
+        "--scope",
+        choices=["all", "global", "user", "current"],
+        default="all",
+        help="Which memory roots to search (default: all).",
+    )
+    parser.add_argument("--why", action="store_true", help="Show score breakdown per result.")
+    args = parser.parse_args(argv)
+
+    query_terms = tokenize(args.query)
+    if not query_terms:
+        print(f'## Recall: "{args.query}"\n\n_Query has no searchable terms._\n')
+        return 0
+
+    docs = gather_docs(args.scope)
+    if not docs:
+        print(f'## Recall: "{args.query}"\n\n_Memory corpus is empty for scope: {args.scope}._\n')
+        return 0
+
+    score_bm25(docs, query_terms)
+
+    for d in docs:
+        d.tag_mult = tag_multiplier(d.path.name)
+        d.recency_mult = recency_multiplier(d.path)
+        d.score = d.bm25 * d.tag_mult * d.recency_mult
+
+    results, used, omitted = pack_results(docs, args.budget, args.limit)
+    print(render_markdown(args.query, results, used, args.budget, omitted, args.why))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
