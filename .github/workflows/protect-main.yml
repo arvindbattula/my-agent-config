@@ -25,26 +25,31 @@ jobs:
         run: |
           set -u
 
-          # Layer 1: commit-message pattern. GitHub auto-titles squash merges
-          # as "...(#N)" and merge commits as "Merge pull request #N". This
-          # beats the timing race against the commit<->PR API association.
-          if [[ "$COMMIT_MSG" =~ \(#[0-9]+\)$ ]] \
-             || [[ "$COMMIT_MSG" =~ ^Merge\ pull\ request\ \#[0-9]+ ]]; then
-            echo "Commit message indicates PR merge — all good"
+          # Layer 1: commit-message pattern against the SUBJECT LINE ONLY.
+          # github.event.head_commit.message is the full multi-line message
+          # (subject + body). Bash regex `$` anchors end-of-string, so we
+          # must isolate line 1 before matching. GitHub auto-titles squash
+          # merges as "...(#N)" and merge commits as "Merge pull request #N".
+          SUBJECT=$(printf '%s' "$COMMIT_MSG" | head -n 1)
+          echo "Commit subject: $SUBJECT"
+          if [[ "$SUBJECT" =~ \(#[0-9]+\)$ ]] \
+             || [[ "$SUBJECT" =~ ^Merge\ pull\ request\ \#[0-9]+ ]]; then
+            echo "Commit subject indicates PR merge — all good"
             exit 0
           fi
 
           # Layer 2: API lookup with retry. Handles rebase-merge and any
-          # edge case where the title convention doesn't apply. Retries
-          # cover the brief window before GitHub links commit -> PR.
-          for attempt in 1 2 3; do
+          # edge case where the title convention doesn't apply. GitHub's
+          # commit->PR linking can lag >10s after a squash merge, so
+          # retry up to 6 times over 30s before giving up.
+          for attempt in 1 2 3 4 5 6; do
             PR_COUNT=$(gh api "repos/$REPO/commits/$COMMIT_SHA/pulls" \
               --jq 'length' 2>/dev/null || echo 0)
             if [ "$PR_COUNT" -gt 0 ]; then
               echo "API confirms PR association (attempt $attempt) — all good"
               exit 0
             fi
-            if [ "$attempt" -lt 3 ]; then
+            if [ "$attempt" -lt 6 ]; then
               sleep 5
             fi
           done
