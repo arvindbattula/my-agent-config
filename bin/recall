@@ -18,13 +18,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import re
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import Any, List, Dict, Tuple, Optional
 
 
 # ─── Config ─────────────────────────────────────────────────────────────────
@@ -77,6 +78,12 @@ SECTION_CHUNK_LINES = 60
 # Skip these files — noise for recall
 SKIP_FILES = {"MEMORY.md"}
 
+# Manifest cache. Bump CACHE_VERSION when tokenization or chunking rules
+# change so cached entries from older rules get discarded automatically.
+CACHE_VERSION = 1
+CACHE_DIR = CLAUDE_DIR / "cache" / "recall"
+CACHE_FILE = CACHE_DIR / "manifest.json"
+
 # Minimal English stoplist. Keep small — BM25's IDF already dampens common terms.
 STOPWORDS = set(
     "a an the and or of to in on for with by at from is are was were be been "
@@ -91,17 +98,56 @@ def tok(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+def _stem(token: str) -> str:
+    """Minimal suffix stripper. Applied to both query and corpus, so exact
+    reversibility doesn't matter — what matters is that variants collide.
+
+    Handles: plurals (ies/sses/s), past tense (ed), gerunds (ing). Does NOT
+    attempt Porter-style vowel/consonant rules, so some morphological
+    variants won't collide (e.g., 'configure' vs 'configured'). That's an
+    acceptable floor for a 2000-line corpus — revisit if miss-rate
+    becomes observable.
+    """
+    n = len(token)
+    if n > 4 and token.endswith("ing"):
+        return token[:-3]
+    if n > 3 and token.endswith("ed") and not token.endswith("eed"):
+        return token[:-2]
+    if n > 3 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if n > 3 and token.endswith("sses"):
+        return token[:-2]
+    # Strip trailing 's' for plurals. Carve out 'ss' (pass, class) and 'us'
+    # (status, virus, bonus) because those are never plurals. We do NOT
+    # carve out 'is' — that would block 'apis' → 'api', which is exactly
+    # the reviewer's failure case. Cost is 'analysis'/'basis' stemming to
+    # 'analysi'/'basi', which is fine because both forms stem identically.
+    if (
+        n > 3
+        and token.endswith("s")
+        and not token.endswith("ss")
+        and not token.endswith("us")
+    ):
+        return token[:-1]
+    return token
+
+
 # ─── Document model ─────────────────────────────────────────────────────────
 
 @dataclass
 class Doc:
-    """A single retrievable unit — whole file or a section of a large file."""
+    """A single retrievable unit — whole file or a section of a large file.
+
+    Content is loaded lazily (empty until pack_results reaches the doc)
+    so the cache-hit path doesn't read files we don't end up rendering.
+    """
     path: Path
     scope: str                  # "global" | "user" | "project:<slug>"
-    title: str                  # filename or "filename § section"
-    content: str                # raw markdown content
+    title: str                  # filename or "filename § section [idx]"
+    content: str = ""           # raw markdown, loaded lazily
     tokens: List[str] = field(default_factory=list)
     length: int = 0             # len(tokens), cached
+    chunk_idx: Optional[int] = None  # None = whole file; int = section index
     # Scoring intermediates (populated during scoring)
     bm25: float = 0.0
     tag_mult: float = 1.0
@@ -111,8 +157,14 @@ class Doc:
 
 
 def tokenize(text: str) -> List[str]:
-    return [t for t in TOKEN_RE.findall(text.lower())
-            if len(t) >= 2 and t not in STOPWORDS]
+    out: List[str] = []
+    for raw in TOKEN_RE.findall(text.lower()):
+        if len(raw) < 2 or raw in STOPWORDS:
+            continue
+        s = _stem(raw)
+        if len(s) >= 2 and s not in STOPWORDS:
+            out.append(s)
+    return out
 
 
 def tag_multiplier(filename: str) -> float:
@@ -129,97 +181,257 @@ def recency_multiplier(path: Path) -> float:
         age_days = (time.time() - path.stat().st_mtime) / 86400.0
     except OSError:
         return 1.0
+    # Clamp negative ages (future mtimes from git checkout, rsync, clock
+    # skew, etc.) so they can't exceed 1.0 and bury real results.
+    age_days = max(0.0, age_days)
     # 2^(-age/half_life): 1.0 fresh, 0.5 at half-life, 0.25 at 2× half-life
     return math.pow(2.0, -age_days / HALF_LIFE_DAYS)
 
 
-def split_into_sections(content: str) -> List[Tuple[str, str]]:
-    """Split on lines starting with `## ` (level-2 headings).
+# Fallback block size when a large file has no `## ` headings
+FALLBACK_BLOCK_LINES = 40
 
-    Returns [(section_title, section_text), ...]. The pre-heading preamble is
-    returned with title "intro" if non-empty.
+
+def split_into_sections(content: str) -> List[Tuple[str, str]]:
+    """Split a large file into retrievable chunks.
+
+    Primary: split on `## ` (level-2 headings). Level-1 is document title,
+    level-3+ is too granular and corrupts BM25 avgdl.
+
+    Fallback: if the file has no level-2 headings, split into fixed
+    FALLBACK_BLOCK_LINES blocks so giant unstructured files can't bypass
+    chunking and blow the budget.
+
+    Returns [(section_title, section_text), ...].
     """
     lines = content.splitlines(keepends=True)
-    sections: List[Tuple[str, str]] = []
-    current_title: Optional[str] = None
-    current_buf: List[str] = []
+    has_level2 = any(line.startswith("## ") for line in lines)
 
-    def flush():
-        if not current_buf:
-            return
-        text = "".join(current_buf).strip("\n")
+    if has_level2:
+        sections: List[Tuple[str, str]] = []
+        current_title: Optional[str] = None
+        current_buf: List[str] = []
+
+        def flush():
+            if not current_buf:
+                return
+            text = "".join(current_buf).strip("\n")
+            if text:
+                title = current_title if current_title else "intro"
+                sections.append((title, text))
+
+        for line in lines:
+            if line.startswith("## "):
+                flush()
+                current_title = line[3:].strip()
+                current_buf = [line]
+            else:
+                current_buf.append(line)
+        flush()
+        return sections
+
+    # Fallback: fixed-size blocks
+    blocks: List[Tuple[str, str]] = []
+    for i in range(0, len(lines), FALLBACK_BLOCK_LINES):
+        text = "".join(lines[i:i + FALLBACK_BLOCK_LINES]).strip("\n")
         if text:
-            title = current_title if current_title else "intro"
-            sections.append((title, text))
-
-    for line in lines:
-        if line.startswith("## "):
-            flush()
-            current_title = line[3:].strip()
-            current_buf = [line]
-        else:
-            current_buf.append(line)
-    flush()
-
-    return sections
+            blocks.append((f"block {i // FALLBACK_BLOCK_LINES + 1}", text))
+    return blocks
 
 
-def load_docs_from_dir(mem_dir: Path, scope: str) -> List[Doc]:
+def _chunks_for_file(path: Path, content: str) -> List[Dict[str, Any]]:
+    """Produce serializable chunk dicts for manifest storage.
+
+    Each chunk: {title, tokens, length, chunk_idx}. chunk_idx is None for
+    whole-file docs; an integer for section splits so lazy content loading
+    can re-split and extract the right section deterministically.
+    """
+    chunks: List[Dict[str, Any]] = []
+    line_count = content.count("\n") + 1
+    if line_count >= SECTION_CHUNK_LINES:
+        for idx, (title, text) in enumerate(split_into_sections(content)):
+            if title == "intro" and idx == 0:
+                full_title = path.name
+            else:
+                full_title = f"{path.name} § {title} [{idx}]"
+            tokens = tokenize(text)
+            if not tokens:
+                continue
+            chunks.append({
+                "title": full_title,
+                "tokens": tokens,
+                "length": len(tokens),
+                "chunk_idx": idx,
+            })
+    else:
+        tokens = tokenize(content)
+        if tokens:
+            chunks.append({
+                "title": path.name,
+                "tokens": tokens,
+                "length": len(tokens),
+                "chunk_idx": None,
+            })
+    return chunks
+
+
+def _docs_from_chunks(path: Path, scope: str, chunks: List[Dict[str, Any]]) -> List[Doc]:
+    out: List[Doc] = []
+    for c in chunks:
+        out.append(Doc(
+            path=path,
+            scope=scope,
+            title=c["title"],
+            content="",  # lazy
+            tokens=list(c["tokens"]),
+            length=int(c["length"]),
+            chunk_idx=c.get("chunk_idx"),
+        ))
+    return out
+
+
+def load_docs_from_dir(mem_dir: Path, scope: str, manifest: Dict[str, Any]) -> List[Doc]:
+    """Enumerate .md files in mem_dir, using the manifest for cache hits and
+    re-tokenizing only changed/new files. Prunes manifest entries for files
+    that have disappeared from this directory.
+    """
     if not mem_dir.is_dir():
         return []
+
+    try:
+        dir_resolved = str(mem_dir.resolve())
+    except OSError:
+        return []
+
     docs: List[Doc] = []
+    current_keys: set = set()
+    files_map: Dict[str, Dict[str, Any]] = manifest.setdefault("files", {})
+
     for path in sorted(mem_dir.glob("*.md")):
         if path.name in SKIP_FILES:
             continue
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        abs_key = str(path.resolve())
+        current_keys.add(abs_key)
+
+        cached = files_map.get(abs_key)
+        if cached and cached.get("mtime") == st.st_mtime and "chunks" in cached:
+            docs.extend(_docs_from_chunks(path, scope, cached["chunks"]))
+            continue
+
+        # Cache miss — read + tokenize, update manifest
         try:
             content = path.read_text(encoding="utf-8")
         except OSError:
             continue
         if not content.strip():
+            files_map.pop(abs_key, None)
             continue
 
-        line_count = content.count("\n") + 1
-        if line_count >= SECTION_CHUNK_LINES:
-            for title, text in split_into_sections(content):
-                full_title = f"{path.name} § {title}" if title != "intro" else path.name
-                doc = Doc(path=path, scope=scope, title=full_title, content=text)
-                doc.tokens = tokenize(text)
-                doc.length = len(doc.tokens)
-                if doc.length > 0:
-                    docs.append(doc)
-        else:
-            doc = Doc(path=path, scope=scope, title=path.name, content=content)
-            doc.tokens = tokenize(content)
-            doc.length = len(doc.tokens)
-            if doc.length > 0:
-                docs.append(doc)
+        chunks = _chunks_for_file(path, content)
+        if not chunks:
+            files_map.pop(abs_key, None)
+            continue
+        files_map[abs_key] = {
+            "mtime": st.st_mtime,
+            "scope": scope,
+            "chunks": chunks,
+        }
+        docs.extend(_docs_from_chunks(path, scope, chunks))
+
+    # Prune stale entries that used to live in this dir but no longer do
+    stale = [
+        k for k in list(files_map.keys())
+        if k.startswith(dir_resolved + "/") and k not in current_keys
+    ]
+    for k in stale:
+        del files_map[k]
+
     return docs
 
 
-def gather_docs(scope: str) -> List[Doc]:
-    """Assemble the corpus for the requested scope."""
+def _load_content_for_doc(doc: Doc) -> str:
+    """Lazily load the content of a Doc from disk. For section docs,
+    re-split the parent file and return the chunk matching chunk_idx.
+    """
+    try:
+        content = doc.path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    if doc.chunk_idx is None:
+        return content
+    line_count = content.count("\n") + 1
+    if line_count < SECTION_CHUNK_LINES:
+        # File shrunk below chunking threshold since cache was built;
+        # return the whole file rather than fail
+        return content
+    sections = split_into_sections(content)
+    if 0 <= doc.chunk_idx < len(sections):
+        return sections[doc.chunk_idx][1]
+    return content  # fallback — section index no longer valid
+
+
+def load_manifest() -> Dict[str, Any]:
+    """Read manifest JSON. Any read/parse failure or version mismatch
+    yields an empty manifest — we'd rather rebuild than use stale data.
+    """
+    try:
+        with CACHE_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("version") == CACHE_VERSION and isinstance(data.get("files"), dict):
+            return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"version": CACHE_VERSION, "files": {}}
+
+
+def save_manifest(manifest: Dict[str, Any]) -> None:
+    """Atomic write via tmp + replace. Silent fallback on OSError so a
+    read-only cache dir doesn't break the tool (correctness > performance).
+    """
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE_FILE.with_suffix(".json.tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(manifest, f, separators=(",", ":"))
+        tmp.replace(CACHE_FILE)
+    except OSError:
+        return
+
+
+def gather_docs(scope: str, manifest: Dict[str, Any]) -> List[Doc]:
+    """Assemble the corpus for the requested scope.
+
+    Dedup is done at the scope-directory level (by resolved absolute path)
+    so that scopes pointing to the same dir (e.g., user == current when
+    invoked from $HOME) don't double-load, and so that sections of one
+    file with duplicate heading names aren't collapsed against each other.
+    """
     project_dir = CLAUDE_DIR / "projects" / _slug(_git_root_or_cwd()) / "memory"
-    docs: List[Doc] = []
 
+    candidates: List[Tuple[str, Path]] = []
     if scope in ("global", "all"):
-        docs.extend(load_docs_from_dir(GLOBAL_MEM_DIR, "global"))
+        candidates.append(("global", GLOBAL_MEM_DIR))
     if scope in ("user", "all"):
-        docs.extend(load_docs_from_dir(USER_MEM_DIR, "user"))
+        candidates.append(("user", USER_MEM_DIR))
     if scope in ("current", "all"):
-        project_scope = f"project:{project_dir.parent.name}"
-        docs.extend(load_docs_from_dir(project_dir, project_scope))
+        candidates.append((f"project:{project_dir.parent.name}", project_dir))
 
-    # Dedup by absolute path + title (user scope may equal cwd scope when
-    # invoked from $HOME)
-    seen = set()
-    unique: List[Doc] = []
-    for d in docs:
-        key = (str(d.path.resolve()), d.title)
-        if key in seen:
+    seen_dirs = set()
+    docs: List[Doc] = []
+    for label, d in candidates:
+        try:
+            resolved = d.resolve()
+        except OSError:
             continue
-        seen.add(key)
-        unique.append(d)
-    return unique
+        if resolved in seen_dirs:
+            continue
+        seen_dirs.add(resolved)
+        docs.extend(load_docs_from_dir(d, label, manifest))
+    return docs
 
 
 # ─── BM25 ───────────────────────────────────────────────────────────────────
@@ -263,6 +475,59 @@ def score_bm25(docs: List[Doc], query_terms: List[str]) -> None:
 
 # ─── Packing and output ─────────────────────────────────────────────────────
 
+def _extract_match_window(content: str, matched_terms: List[str], max_chars: int) -> str:
+    """Truncate content by extracting a window of lines centered on the
+    highest-density match line, rather than blindly taking the first
+    max_chars. Preserves the context BM25 actually scored high for.
+    """
+    if max_chars <= 0:
+        return ""
+    if len(content) <= max_chars:
+        return content
+
+    lines = content.splitlines()
+    if not lines:
+        return content[:max_chars]
+
+    # If no match info, fall back to prefix truncation with ellipsis marker
+    if not matched_terms:
+        return content[:max_chars].rstrip() + "\n\n... (truncated)"
+
+    # Stems were the units that matched BM25; search them as substrings so
+    # morphological variants (configure/configured/configuring) all count
+    lc_terms = [t.lower() for t in matched_terms]
+    line_hits = []
+    for line in lines:
+        line_lc = line.lower()
+        line_hits.append(sum(line_lc.count(t) for t in lc_terms))
+
+    if sum(line_hits) == 0:
+        return content[:max_chars].rstrip() + "\n\n... (truncated)"
+
+    # Center on the densest line
+    center = max(range(len(lines)), key=lambda i: line_hits[i])
+
+    # Expand outward until budget exhausted
+    start = end = center
+    acc = len(lines[center]) + 1
+    while acc < max_chars:
+        expanded = False
+        if start > 0 and acc + len(lines[start - 1]) + 1 <= max_chars:
+            start -= 1
+            acc += len(lines[start]) + 1
+            expanded = True
+        if end < len(lines) - 1 and acc + len(lines[end + 1]) + 1 <= max_chars:
+            end += 1
+            acc += len(lines[end]) + 1
+            expanded = True
+        if not expanded:
+            break
+
+    prefix = "... (earlier content truncated)\n\n" if start > 0 else ""
+    suffix = "\n\n... (later content truncated)" if end < len(lines) - 1 else ""
+    return prefix + "\n".join(lines[start:end + 1]) + suffix
+
+
 def pack_results(docs: List[Doc], budget: int, limit: Optional[int]) -> Tuple[List[Doc], int, int]:
     """Greedy fill by descending score. Returns (included, used_tokens, omitted_count)."""
     ranked = [d for d in docs if d.score > 0]
@@ -273,12 +538,17 @@ def pack_results(docs: List[Doc], budget: int, limit: Optional[int]) -> Tuple[Li
     for d in ranked:
         if limit is not None and len(included) >= limit:
             break
+        # Lazy content load: only top-ranked docs pay the I/O cost
+        if not d.content:
+            d.content = _load_content_for_doc(d)
+        if not d.content:
+            continue  # file disappeared or unreadable between scoring and render
         cost = tok(d.content) + 80  # ~80 tokens of header/framing overhead
         if used + cost > budget:
-            # Special case: first result would exceed budget → include truncated
+            # Top-ranked doc alone exceeds budget: keep it, truncate around matches
             if not included and cost > budget:
                 keep_chars = max(200, (budget - 80) * 4)
-                d.content = d.content[:keep_chars].rstrip() + "\n\n... (truncated to fit budget)"
+                d.content = _extract_match_window(d.content, d.matched_terms, keep_chars)
                 included.append(d)
                 used += tok(d.content) + 80
             continue
@@ -333,14 +603,28 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Which memory roots to search (default: all).",
     )
     parser.add_argument("--why", action="store_true", help="Show score breakdown per result.")
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="Force rebuild of the tokenization cache (drops manifest before scan).",
+    )
     args = parser.parse_args(argv)
+
+    if args.reindex:
+        try:
+            CACHE_FILE.unlink()
+        except OSError:
+            pass
 
     query_terms = tokenize(args.query)
     if not query_terms:
         print(f'## Recall: "{args.query}"\n\n_Query has no searchable terms._\n')
         return 0
 
-    docs = gather_docs(args.scope)
+    manifest = load_manifest()
+    docs = gather_docs(args.scope, manifest)
+    save_manifest(manifest)  # persist any updates from cache misses / prunes
+
     if not docs:
         print(f'## Recall: "{args.query}"\n\n_Memory corpus is empty for scope: {args.scope}._\n')
         return 0
