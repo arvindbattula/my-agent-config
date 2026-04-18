@@ -556,6 +556,12 @@ if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/hooks" ]; then
     chmod +x "$CLAUDE_DIR/hooks"/*.sh 2>/dev/null || true
 fi
 
+sync_files "Bin" "$REPO_DIR/bin" "$CLAUDE_DIR/bin" "*"
+# Ensure bin scripts are executable after sync
+if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/bin" ]; then
+    chmod +x "$CLAUDE_DIR/bin"/* 2>/dev/null || true
+fi
+
 # Summary
 echo ""
 echo -e "${BOLD}Summary${NC}"
