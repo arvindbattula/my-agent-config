@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
 jobs:
   check-direct-push:
     runs-on: ubuntu-latest
@@ -11,28 +16,47 @@ jobs:
       - name: Check if push came from a PR merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pass commit message via env so it can't be interpreted as a shell
+          # expansion by the `run` step (command-injection hardening).
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          PUSHER: ${{ github.actor }}
         run: |
-          COMMIT_SHA="${{ github.sha }}"
-          REPO="${{ github.repository }}"
+          set -u
 
-          # Check if this commit is associated with a merged PR
-          PR_COUNT=$(gh api "repos/$REPO/commits/$COMMIT_SHA/pulls" \
-            --jq 'length')
-
-          if [ "$PR_COUNT" -eq 0 ]; then
-            PUSHER="${{ github.actor }}"
-            echo "::warning::Direct push to main by $PUSHER (no associated PR)"
-
-            # Create an issue to flag the direct push
-            gh issue create \
-              --repo "$REPO" \
-              --title "Direct push to main by $PUSHER" \
-              --body "Commit \`$COMMIT_SHA\` was pushed directly to main without a PR.
-
-              **Pusher:** $PUSHER
-              **Commit:** https://github.com/$REPO/commit/$COMMIT_SHA
-
-              Please use pull requests for all changes to main."
-          else
-            echo "Push is from a merged PR - all good"
+          # Layer 1: commit-message pattern. GitHub auto-titles squash merges
+          # as "...(#N)" and merge commits as "Merge pull request #N". This
+          # beats the timing race against the commit<->PR API association.
+          if [[ "$COMMIT_MSG" =~ \(#[0-9]+\)$ ]] \
+             || [[ "$COMMIT_MSG" =~ ^Merge\ pull\ request\ \#[0-9]+ ]]; then
+            echo "Commit message indicates PR merge — all good"
+            exit 0
           fi
+
+          # Layer 2: API lookup with retry. Handles rebase-merge and any
+          # edge case where the title convention doesn't apply. Retries
+          # cover the brief window before GitHub links commit -> PR.
+          for attempt in 1 2 3; do
+            PR_COUNT=$(gh api "repos/$REPO/commits/$COMMIT_SHA/pulls" \
+              --jq 'length' 2>/dev/null || echo 0)
+            if [ "$PR_COUNT" -gt 0 ]; then
+              echo "API confirms PR association (attempt $attempt) — all good"
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep 5
+            fi
+          done
+
+          # Layer 3: no PR found by either signal — genuine direct push.
+          echo "::warning::Direct push to main by $PUSHER (no associated PR)"
+          gh issue create \
+            --repo "$REPO" \
+            --title "Direct push to main by $PUSHER" \
+            --body "Commit \`$COMMIT_SHA\` was pushed directly to main without a PR.
+
+            **Pusher:** $PUSHER
+            **Commit:** https://github.com/$REPO/commit/$COMMIT_SHA
+
+            Please use pull requests for all changes to main."
