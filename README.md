@@ -100,12 +100,6 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `like-wildcard-escaping` | Escape `%`, `_`, `\` in SQL LIKE with user input, even when parameterized |
 | `path-containment-after-regex` | Pair regex path gates with segment check + post-resolve containment (and realpath for symlink threats) |
 
-### References (loaded on demand)
-| Reference | Purpose |
-|-----------|---------|
-| `security-checklist.md` | Pre-commit security checklist, OWASP Top 10 quick reference |
-| `accessibility-checklist.md` | WCAG 2.1 AA compliance checklist — keyboard, screen reader, contrast, forms, focus |
-
 ### Hooks
 | Hook | Trigger | Purpose |
 |------|---------|---------|

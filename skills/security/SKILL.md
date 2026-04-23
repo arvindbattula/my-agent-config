@@ -235,7 +235,54 @@ After implementing security-relevant code:
 - [ ] Error responses don't expose internal details
 - [ ] Rate limiting active on auth endpoints
 
-See [references/security-checklist.md](../../references/security-checklist.md) for the full pre-commit security checklist.
+## Security Checklist
+
+### Pre-Commit
+
+- [ ] No secrets in code (`git diff --cached | grep -iE 'password|secret|api_key|token'`)
+- [ ] `.gitignore` covers `.env`, `.env.local`, `*.pem`, `*.key`
+- [ ] `.env.example` uses placeholder values only
+
+### Security Headers
+
+```
+Content-Security-Policy: default-src 'self'; script-src 'self'
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: strict-origin-when-cross-origin
+Permissions-Policy: camera=(), microphone=(), geolocation=()
+```
+
+### CORS Configuration
+
+```typescript
+// Restrictive (recommended)
+cors({
+  origin: ['https://yourdomain.com'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+})
+
+// NEVER in production:
+cors({ origin: '*' })
+```
+
+### OWASP Top 10 Quick Reference
+
+| # | Vulnerability | Prevention |
+|---|---|---|
+| 1 | Broken Access Control | Auth checks on every endpoint, ownership verification |
+| 2 | Cryptographic Failures | HTTPS, strong hashing, no secrets in code |
+| 3 | Injection | Parameterized queries, input validation |
+| 4 | Insecure Design | Threat modeling, spec-driven development |
+| 5 | Security Misconfiguration | Security headers, minimal permissions, audit deps |
+| 6 | Vulnerable Components | `npm audit`, keep deps updated, minimal deps |
+| 7 | Auth Failures | Strong passwords, rate limiting, session management |
+| 8 | Data Integrity Failures | Verify updates/dependencies, signed artifacts |
+| 9 | Logging Failures | Log security events, don't log secrets |
+| 10 | SSRF | Validate/allowlist URLs, restrict outbound requests |
 
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
