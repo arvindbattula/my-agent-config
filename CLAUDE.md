@@ -15,7 +15,7 @@ Personal Claude Code configuration — skills, commands, rules, and settings, sy
 
 - `skills/` — Auto-triggered by Claude when relevant (17 skills)
 - `commands/` — User-invoked via `/` in Claude Code (17 commands)
-- `rules/` — Always-on behavioral guidelines (11 rules)
+- `rules/` — Always-on behavioral guidelines (16 rules)
 - `references/` — Supplementary checklists loaded on demand (security, accessibility)
 - `hooks/` — Session lifecycle hooks (session-start, compress-memory)
 - `settings.json` — Permissions, plugins, preferences
