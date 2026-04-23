@@ -59,5 +59,7 @@
     "typescript-lsp@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,
-  "autoUpdatesChannel": "stable"
+  "effortLevel": "xhigh",
+  "autoUpdatesChannel": "stable",
+  "skipAutoPermissionPrompt": true
 }

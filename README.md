@@ -84,7 +84,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | Rule | Behavior |
 |------|----------|
 | `verify-before-done` | Always verify work before declaring complete; frontend requires tests + lint + build |
-| `no-ai-slop` | No obvious comments, no unnecessary defensive checks |
+| `no-ai-slop` | No obvious comments, no unnecessary defensive checks, no aspirational comments describing unimplemented intent |
 | `simplicity-over-cleverness` | Simplest solution that works, no over-engineering |
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
 | `minimal-diff` | Only change what's necessary; exception: update broken call sites directly |
@@ -92,8 +92,13 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `sunk-cost-breaker` | Stop after 3+ failed attempts; propose fresh restart with lessons learned |
 | `no-lint-suppression` | Fix lint/type errors, never suppress with eslint-disable or ts-ignore |
 | `no-backwards-compat` | No migration shims or compatibility wrappers unless explicitly asked |
+| `enumerate-spec-lists-first` | Split slash-lists and conditional clauses in specs into enumerated items before implementing |
+| `tests-enforce-spec-not-code` | Every test assertion should trace to a spec requirement, not incidental implementation |
+| `test-every-escape-hatch` | For every test bypass (dry-run, mock, skip flag), write one smoke test that uses the real path |
+| `async-writes-serialize` | Serialize concurrent async writes to shared state via a single-flight queue |
 | `batch-loop-exception-breadth` | Use broad `except Exception` per item in batch loops calling external services |
 | `like-wildcard-escaping` | Escape `%`, `_`, `\` in SQL LIKE with user input, even when parameterized |
+| `path-containment-after-regex` | Pair regex path gates with segment check + post-resolve containment (and realpath for symlink threats) |
 
 ### References (loaded on demand)
 | Reference | Purpose |
