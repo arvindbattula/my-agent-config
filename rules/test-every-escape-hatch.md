@@ -1,0 +1,5 @@
+When you write a test helper that lets tests skip the real thing — `dry_run`, `skip_network`, `startWatching: false`, injected-clock, mocked-service, in-memory-db, `skipIf(!process.env.X)` — simultaneously write at least one test that DOES NOT use the escape. The escape becomes a dark corner where bugs accumulate if every test takes it.
+
+Signs the escape has grown teeth: "we don't test that path, it's hard to set up." Code in that path keeps shipping; bugs in it keep shipping too. The paired bypass test is the cheapest thing you'll ever do to prevent a whole class of "tests pass, production breaks" incidents.
+
+Applies to chokidar watchers, HTTP clients, database connections, auth providers, queue consumers, file I/O — anything where test ergonomics tempt you to bypass the real thing. One smoke test through the escape is enough; you don't need full coverage without the escape, you need non-zero coverage. See `async-writes-serialize.md` for the concurrency-specific variant (controlled-pause mocks).
