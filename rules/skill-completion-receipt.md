@@ -1,0 +1,19 @@
+When you run a slash command or skill that has numbered steps, print a completion receipt at the end — before claiming the skill is done. The receipt lists every numbered step from the skill file with `✓` (executed), `✗` (skipped, with one-line reason), or `N/A` (explicitly doesn't apply to this project — say why).
+
+Format:
+```
+## Receipt: /<command>
+- Step 1 [name]: ✓
+- Step 2 [name]: ✗ (reason)
+- Step 3 [name]: N/A (reason)
+...
+```
+
+Why: multi-step skills (/retro, /wrap-session, /inspect, /discover, /blueprint) get silently truncated — the recall step gets skipped, the NEXT-SESSION.md body doesn't get refreshed, a second-pass review never happens. Silent skipping is the failure mode. A forced enumeration surfaces it before the user has to.
+
+Rules:
+- Never print `✓` for a step you didn't actually execute. That's worse than skipping — it lies about the state.
+- If a step has sub-steps (e.g., "Step 4: update each skill's performance notes"), enumerate the sub-steps or give a count ("4/9 skills touched, rest N/A").
+- Do not fabricate a step that isn't in the skill file to pad the receipt. The receipt mirrors the skill's numbered sections exactly.
+- Applies to skills with 2+ numbered steps. Single-step commands (/decide, /sync) don't need a receipt.
+- If you realize mid-receipt that a step you claimed `✓` was actually skipped, correct the receipt and do the step — don't silently move on.
