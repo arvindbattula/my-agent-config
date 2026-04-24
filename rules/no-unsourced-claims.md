@@ -1,7 +1,7 @@
 Never invent statistics, percentages, or confidence numbers. If you didn't read the number from a specific file, URL, command output, or prior message in this conversation, you don't know it — don't state it.
 
 When making a quantitative claim, tag it:
-- `[sourced: <file:line or URL>]` — a real, checkable reference
+- `[sourced: <file:line, URL, command output, or prior-message reference>]` — a real, checkable reference
 - `[unsourced — estimate]` — your honest guess, clearly labeled
 - `[opinion]` — your judgment or recommendation, not a fact
 
