@@ -99,6 +99,17 @@ Present findings organized by severity. Within each category, label individual f
 | **Nit:** | Minor, optional — style or preference | Author may ignore |
 | **FYI** | Informational, no action needed | Context for future reference |
 
+### Re-calibrate severity before printing
+
+If you used subagents for review passes, do not pass their severity ratings through to the user verbatim. Subagents have only the code they see — they don't know what's *introduced by this change* vs. *inherited from the existing codebase*, and they tend to inflate severity on consistency observations.
+
+For every **Critical** or **Important** finding from a subagent, run two checks:
+
+1. **Inherited or introduced?** Is this issue a pre-existing pattern (other call sites already have it, or a sibling IPC/module does the same thing) or is the change under review introducing it? If inherited, demote at least one level and note it as "pre-existing pattern, worth a follow-up" rather than a blocker on this change.
+2. **Real blast radius?** If the user followed this finding, would they avoid a real outage / data loss / security incident, or just better hygiene? If only the latter, demote to Nit or FYI.
+
+Preserve Critical when the inherited issue is genuinely severe (security flaw, data corruption). Inheritance demotes severity only when the blast radius is small.
+
 Categories:
 
 ### Fix Now
@@ -169,3 +180,5 @@ Based on findings, suggest:
 - 2026-03-31 [innovate-intel]: Edge cases pass (Pass 3) found the most actionable issues — 21 unguarded json.loads, PDF filename injection, missing input validation. Architecture pass found real concerns but lower severity (evidence: inspection Fix Now items)
 - 2026-03-31 [innovate-intel]: Parallel subagents for passes 1/3/4+5 worked well (3 agents). Spec compliance pass (Pass 2) found zero gaps — could be skipped for projects at Phase 8 maturity if inspection was run at earlier milestones (evidence: spec compliance agent found 0 gaps)
 - 2026-03-31 [innovate-intel]: Re-inspection after fixes (verify pass) caught the RuntimeSettingsProvider test needing ToastProvider wrapper — a regression introduced by the fix. Always re-run full test suite, not just new tests (evidence: 1 failing test in RuntimeSettingsProvider.test.tsx after Toast wiring)
+- 2026-05-18 [innovate-intel]: For focused-fix sessions, the "inherited-pattern sweep" (re-grepping for other call sites of the bug class after a primitive is fixed) was the single highest-signal output of inspect — found 3 other canonical-only entity lookups (`run_deduplication` x2, `reports.py:368`) beyond issue #7's original triage scope. Consider elevating this from a paragraph buried in pass findings to a dedicated "Inherited from this change" section in the report template (evidence: issue #7 inspect output)
+- 2026-05-18 [innovate-intel]: Promote-to-global step produced a rule suggestion that overlapped with existing `~/.claude/rules/minimal-diff.md`; user declined the promotion citing the overlap. The "Promote to global" prompt should pre-check `~/.claude/rules/` for keyword overlap with the proposed rule and surface conflicts in the prompt — asking the user to spot overlap manually is the failure mode (evidence: this session's discussion on the proposed "sweep for instances" rule)

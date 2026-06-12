@@ -10,6 +10,7 @@
       "Bash(pip:*)"
     ]
   },
+  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -59,7 +60,8 @@
     "typescript-lsp@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,
-  "effortLevel": "xhigh",
+  "effortLevel": "high",
   "autoUpdatesChannel": "stable",
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "theme": "light"
 }
