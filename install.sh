@@ -573,6 +573,24 @@ sync_pi() {
     print_header "Pi"
     mkdir -p "$AGENTS_SKILLS"
 
+    # Remove dead symlinks (skill deleted from repo).
+    for link in "$AGENTS_SKILLS"/*; do
+        [ -L "$link" ] || continue
+        if [ ! -e "$link" ]; then
+            local dead
+            dead="$(basename "$link")"
+            if $STATUS_ONLY; then
+                echo -e "  ${YELLOW}!${NC} $dead ${GRAY}(dead symlink — will remove on sync)${NC}"
+            elif $DRY_RUN; then
+                echo -e "  ${YELLOW}!${NC} $dead ${GRAY}→ would remove (dead symlink)${NC}"
+            else
+                rm -f "$link"
+                echo -e "  ${YELLOW}!${NC} $dead ${GRAY}→ removed (dead symlink)${NC}"
+                ((actions_taken++))
+            fi
+        fi
+    done
+
     # Real skills -> symlinks into repo
     for d in "$REPO_DIR"/skills/*/; do
         [ -d "$d" ] || continue
@@ -601,11 +619,9 @@ sync_pi() {
     if $STATUS_ONLY || $DRY_RUN; then
         echo -e "  ${GRAY}command-skills: $existing present, $cmd_count from commands/${NC}"
     else
-        rm -rf "$AGENTS_SKILLS"/source-command-* 2>/dev/null || true
-        "$REPO_DIR/generate-pi-command-skills.sh" >/dev/null 2>&1
-        local now
-        now="$(find "$AGENTS_SKILLS" -maxdepth 1 -name 'source-command-*' -type d | wc -l | tr -d ' ')"
-        echo -e "  ${BLUE}↓${NC} command-skills ${GRAY}→ regenerated ($now)${NC}"
+        # Generator is idempotent and self-pruning: only writes changed skills
+        # and removes orphans whose command was deleted.
+        "$REPO_DIR/generate-pi-command-skills.sh" 2>/dev/null | sed 's/^/  /'
         ((actions_taken++))
     fi
 }
