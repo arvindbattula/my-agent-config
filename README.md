@@ -1,6 +1,6 @@
 # my-agent-config
 
-Personal Claude Code configuration — skills, commands, rules, and settings — synced across machines.
+Personal agent configuration — skills, commands, rules, and settings — synced across machines. Primary target is Claude Code (`~/.claude`); skills and extensions are also synced for the Pi coding agent, and Codex reads `AGENTS.md` directly.
 
 ## Quick Start
 
@@ -99,6 +99,8 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `batch-loop-exception-breadth` | Use broad `except Exception` per item in batch loops calling external services |
 | `like-wildcard-escaping` | Escape `%`, `_`, `\` in SQL LIKE with user input, even when parameterized |
 | `path-containment-after-regex` | Pair regex path gates with segment check + post-resolve containment (and realpath for symlink threats) |
+| `no-unsourced-claims` | Never invent stats; tag quantitative claims as sourced/estimate/opinion; don't smuggle opinions as facts |
+| `skill-completion-receipt` | For 2+ step skills/commands, print a per-step receipt (✓/✗/N/A) before claiming done |
 
 ### Hooks
 | Hook | Trigger | Purpose |
