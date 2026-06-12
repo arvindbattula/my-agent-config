@@ -4,6 +4,7 @@ set -uo pipefail
 # Resolve repo directory from script location
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
+AGENTS_SKILLS="$HOME/.agents/skills"
 BACKUP_DIR="$CLAUDE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
 
 # Flags
@@ -561,6 +562,55 @@ sync_files "Bin" "$REPO_DIR/bin" "$CLAUDE_DIR/bin" "*"
 if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/bin" ]; then
     chmod +x "$CLAUDE_DIR/bin"/* 2>/dev/null || true
 fi
+
+# ─── Pi (~/.agents/skills) ───
+# pi reads skills from ~/.agents/skills. Real skills are symlinked to the repo
+# (live, zero-drift); commands are generated into source-command-* skills since
+# pi has no command concept. Only runs if ~/.agents exists.
+sync_pi() {
+    [ -d "$HOME/.agents" ] || return 0
+
+    print_header "Pi"
+    mkdir -p "$AGENTS_SKILLS"
+
+    # Real skills -> symlinks into repo
+    for d in "$REPO_DIR"/skills/*/; do
+        [ -d "$d" ] || continue
+        local name link want
+        name="$(basename "$d")"
+        link="$AGENTS_SKILLS/$name"
+        want="$REPO_DIR/skills/$name"
+        if [ -L "$link" ] && [ "$(readlink "$link")" = "$want" ]; then
+            echo -e "  ${GREEN}✓${NC} $name ${GRAY}(symlink)${NC}"
+        elif $STATUS_ONLY; then
+            echo -e "  ${YELLOW}!${NC} $name ${GRAY}(not symlinked — will link on sync)${NC}"
+        elif $DRY_RUN; then
+            echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ would symlink${NC}"
+        else
+            rm -rf "$link"
+            ln -s "$want" "$link"
+            echo -e "  ${BLUE}↓${NC} $name ${GRAY}→ symlinked${NC}"
+            ((actions_taken++))
+        fi
+    done
+
+    # Command-skills: pi has no commands, so generate source-command-* skills.
+    local cmd_count existing
+    cmd_count="$(find "$REPO_DIR/commands" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')"
+    existing="$(find "$AGENTS_SKILLS" -maxdepth 1 -name 'source-command-*' -type d | wc -l | tr -d ' ')"
+    if $STATUS_ONLY || $DRY_RUN; then
+        echo -e "  ${GRAY}command-skills: $existing present, $cmd_count from commands/${NC}"
+    else
+        rm -rf "$AGENTS_SKILLS"/source-command-* 2>/dev/null || true
+        "$REPO_DIR/generate-pi-command-skills.sh" >/dev/null 2>&1
+        local now
+        now="$(find "$AGENTS_SKILLS" -maxdepth 1 -name 'source-command-*' -type d | wc -l | tr -d ' ')"
+        echo -e "  ${BLUE}↓${NC} command-skills ${GRAY}→ regenerated ($now)${NC}"
+        ((actions_taken++))
+    fi
+}
+
+sync_pi
 
 # Summary
 echo ""
