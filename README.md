@@ -109,7 +109,10 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 
 ### Config
 - `settings.json` — Permissions, hooks, extended thinking, plugins, statusline
-- `statusline.sh` — Terminal status bar showing directory, model, context usage, git state
+- `statusline.sh` — Terminal status bar showing directory, model, context usage, git state (Claude Code)
+- `pi/extensions/statusline.ts` — Equivalent two-line footer for the Pi coding agent, synced to `~/.pi/agent/extensions/` by `install.sh` (auto-discovered by the Pi CLI). Shows model, dir, git branch + diff stats, thinking level, context bar, tokens, cost, and session elapsed time. Rate limits are omitted (not exposed by Pi); duration is session wall-clock rather than cumulative request time. Colors use `theme.fg()`, so the footer adapts to the active Pi theme.
+
+> **Light terminal:** Pi auto-detects terminal background; if it guesses wrong (e.g. a dark theme on a white terminal), text becomes unreadable. Set `"theme": "light"` in your **personal** `~/.pi/agent/settings.json` — this is machine/terminal-specific and intentionally not committed.
 
 ## How Sync Works
 
@@ -122,6 +125,12 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 - `~` Both exist, differ — lets you choose which to keep
 
 All overwrites create timestamped backups in `~/.claude/backups/`.
+
+Beyond `~/.claude/`, `install.sh` also syncs Pi coding agent resources when present:
+- **Pi skills** (`~/.agents/skills`) — repo skills are symlinked; `/`-commands are generated into `source-command-*` skills.
+- **Pi extensions** (`~/.pi/agent/extensions`) — repo `pi/extensions/*.ts` are copied there (auto-discovered by the Pi CLI). Personal extensions not in the repo (e.g. `azure-foundry.ts`) show as `+ local only` and are never pulled in automatically.
+
+Both sections only run if the corresponding Pi directory already exists.
 
 > **Note:** A running Claude Code session manages `~/.claude/settings.json` in memory and may overwrite external changes. If `settings.json` shows as "differs" after sync, exit all Claude Code sessions first, then run `./install.sh` again.
 
