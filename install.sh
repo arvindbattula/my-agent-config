@@ -5,6 +5,7 @@ set -uo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 AGENTS_SKILLS="$HOME/.agents/skills"
+PI_EXTENSIONS="$HOME/.pi/agent/extensions"
 BACKUP_DIR="$CLAUDE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
 
 # Flags
@@ -563,6 +564,102 @@ if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/bin" ]; then
     chmod +x "$CLAUDE_DIR/bin"/* 2>/dev/null || true
 fi
 
+# ─── Pi extensions (~/.pi/agent/extensions) ───
+# The Pi coding agent CLI auto-discovers extensions from ~/.pi/agent/extensions.
+# Sync repo pi/extensions/*.ts there. Repo is the source of truth; local edits
+# can be pulled back interactively (same r/l/d/s flow as other config files).
+# Only runs if ~/.pi/agent exists (i.e. Pi CLI is installed for this user).
+sync_pi_extensions() {
+    [ -d "$HOME/.pi/agent" ] || return 0
+    [ -d "$REPO_DIR/pi/extensions" ] || return 0
+
+    print_header "Pi Extensions"
+    mkdir -p "$PI_EXTENSIONS"
+
+    local names=()
+    for f in "$REPO_DIR"/pi/extensions/*.ts; do
+        [ -f "$f" ] && names+=("$(basename "$f")")
+    done
+    for f in "$PI_EXTENSIONS"/*.ts; do
+        [ -f "$f" ] || continue
+        local n; n="$(basename "$f")"
+        [[ " ${names[*]:-} " =~ " $n " ]] || names+=("$n")
+    done
+
+    IFS=$'\n' names=($(sort <<<"${names[*]:-}")); unset IFS
+
+    for name in "${names[@]}"; do
+        [ -n "$name" ] || continue
+        local r="$REPO_DIR/pi/extensions/$name"
+        local l="$PI_EXTENSIONS/$name"
+        local status; status=$(compare_file "$r" "$l")
+
+        case "$status" in
+            identical)
+                echo -e "  ${GREEN}✓${NC} $name"
+                ((identical++))
+                ;;
+            differs)
+                if $STATUS_ONLY; then
+                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}(differs)${NC}"
+                    ((local_newer++))
+                elif $FORCE; then
+                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}→ copied repo to local${NC}"
+                    if ! $DRY_RUN; then
+                        backup_file "$l"
+                        cp "$r" "$l"
+                        ((actions_taken++))
+                    fi
+                    ((local_newer++))
+                else
+                    action=$(ask_action "$name" "differs")
+                    if [ "$action" = "repo" ]; then
+                        if ! $DRY_RUN; then backup_file "$l"; cp "$r" "$l"; ((actions_taken++)); fi
+                        echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
+                    elif [ "$action" = "local" ]; then
+                        if ! $DRY_RUN; then cp "$l" "$r"; ((actions_taken++)); fi
+                        echo -e "    ${GREEN}→ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
+                    elif [ "$action" = "diff" ]; then
+                        diff "$r" "$l" || true
+                        read -p "    Use [r]epo / keep [l]ocal / [s]kip? " choice2
+                        case "$choice2" in
+                            r|R) if ! $DRY_RUN; then backup_file "$l"; cp "$r" "$l"; ((actions_taken++)); fi
+                                 echo -e "    ${GREEN}→ copied repo to local${NC}" ;;
+                            l|L) if ! $DRY_RUN; then cp "$l" "$r"; ((actions_taken++)); fi
+                                 echo -e "    ${GREEN}→ copied local to repo${NC}" ;;
+                            *) echo -e "    ${GRAY}→ skipped${NC}" ;;
+                        esac
+                    fi
+                    ((local_newer++))
+                fi
+                ;;
+            repo_only)
+                if $STATUS_ONLY; then
+                    echo -e "  ${BLUE}↓${NC} $name ${GRAY}(in repo, not local)${NC}"
+                else
+                    echo -e "  ${BLUE}↓${NC} $name ${GRAY}(copying to local)${NC}"
+                    if ! $DRY_RUN; then cp "$r" "$l"; ((actions_taken++)); fi
+                fi
+                ((repo_only++))
+                ;;
+            local_only)
+                if $STATUS_ONLY; then
+                    echo -e "  ${CYAN}+${NC} $name ${GRAY}(local only)${NC}"
+                else
+                    action=$(ask_action "$name" "local_only")
+                    if [ "$action" = "to_repo" ]; then
+                        if ! $DRY_RUN; then cp "$l" "$r"; ((actions_taken++)); fi
+                        echo -e "    ${GREEN}→ copied to repo${NC}$($DRY_RUN && echo " (dry-run)")"
+                    fi
+                fi
+                ((local_only++))
+                ;;
+        esac
+    done
+
+    return 0
+}
+
 # ─── Pi (~/.agents/skills) ───
 # pi reads skills from ~/.agents/skills. Real skills are symlinked to the repo
 # (live, zero-drift); commands are generated into source-command-* skills since
@@ -639,6 +736,8 @@ sync_pi() {
 
     return 0
 }
+
+sync_pi_extensions
 
 sync_pi
 pi_status=$?
