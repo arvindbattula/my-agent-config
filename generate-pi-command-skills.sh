@@ -39,8 +39,16 @@ strip_frontmatter() {
     ' "$1"
 }
 
-generated=0
+created=0
+updated=0
+unchanged=0
+removed=0
 skipped=0
+
+# Track which source-command-* skills we expect, so we can prune orphans.
+expected=()
+
+mkdir -p "$AGENTS_SKILLS"
 
 for cmd_file in "$COMMANDS_DIR"/*.md; do
     [ -f "$cmd_file" ] || continue
@@ -57,10 +65,11 @@ for cmd_file in "$COMMANDS_DIR"/*.md; do
 
     skill_name="source-command-$name"
     skill_dir="$AGENTS_SKILLS/$skill_name"
+    skill_file="$skill_dir/SKILL.md"
+    expected+=("$skill_name")
     body="$(strip_frontmatter "$cmd_file")"
 
-    mkdir -p "$skill_dir"
-    {
+    new_content="$(
         echo "---"
         echo "name: \"$skill_name\""
         echo "description: \"$desc\""
@@ -71,9 +80,35 @@ for cmd_file in "$COMMANDS_DIR"/*.md; do
         echo "Skill generated from the \`$name\` command. Use when the user asks to run \`$name\` or describes its purpose."
         echo ""
         echo "$body"
-    } > "$skill_dir/SKILL.md"
+    )"
 
-    ((generated++))
+    if [ -f "$skill_file" ] && [ "$(cat "$skill_file")" = "$new_content" ]; then
+        ((unchanged++))
+    elif [ -f "$skill_file" ]; then
+        printf '%s\n' "$new_content" > "$skill_file"
+        echo "  updated $skill_name"
+        ((updated++))
+    else
+        mkdir -p "$skill_dir"
+        printf '%s\n' "$new_content" > "$skill_file"
+        echo "  created $skill_name"
+        ((created++))
+    fi
 done
 
-echo "  generated: $generated  skipped: $skipped  -> $AGENTS_SKILLS"
+# Prune orphaned source-command-* skills whose command no longer exists.
+for existing in "$AGENTS_SKILLS"/source-command-*/; do
+    [ -d "$existing" ] || continue
+    existing_name="$(basename "$existing")"
+    keep=false
+    for e in "${expected[@]}"; do
+        [ "$e" = "$existing_name" ] && { keep=true; break; }
+    done
+    if ! $keep; then
+        rm -rf "$existing"
+        echo "  removed $existing_name (command deleted)"
+        ((removed++))
+    fi
+done
+
+echo "  created: $created  updated: $updated  unchanged: $unchanged  removed: $removed  skipped: $skipped  -> $AGENTS_SKILLS"
