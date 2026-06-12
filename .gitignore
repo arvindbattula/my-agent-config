@@ -1,6 +1,5 @@
 .DS_Store
 rules-personal/
-agent-skills-adoption-plan.md
 bin/__pycache__/
 rules/parallel-web-search.md
 rules/pi-coding-agent.md
