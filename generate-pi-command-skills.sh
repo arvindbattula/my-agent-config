@@ -63,23 +63,34 @@ for cmd_file in "$COMMANDS_DIR"/*.md; do
         continue
     fi
 
+    # Reject names that could escape the source-command-* namespace.
+    if ! [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "  SKIP $base (invalid name '$name'; allowed: A-Z a-z 0-9 _ -)"
+        ((skipped++))
+        continue
+    fi
+
     skill_name="source-command-$name"
     skill_dir="$AGENTS_SKILLS/$skill_name"
     skill_file="$skill_dir/SKILL.md"
     expected+=("$skill_name")
     body="$(strip_frontmatter "$cmd_file")"
 
+    # YAML-escape description for a double-quoted scalar (\ and " only).
+    desc_escaped="${desc//\\/\\\\}"
+    desc_escaped="${desc_escaped//\"/\\\"}"
+
     new_content="$(
-        echo "---"
-        echo "name: \"$skill_name\""
-        echo "description: \"$desc\""
-        echo "---"
-        echo ""
-        echo "# $skill_name"
-        echo ""
-        echo "Skill generated from the \`$name\` command. Use when the user asks to run \`$name\` or describes its purpose."
-        echo ""
-        echo "$body"
+        printf '%s\n' "---"
+        printf '%s\n' "name: \"$skill_name\""
+        printf '%s\n' "description: \"$desc_escaped\""
+        printf '%s\n' "---"
+        printf '%s\n' ""
+        printf '%s\n' "# $skill_name"
+        printf '%s\n' ""
+        printf '%s\n' "Skill generated from the \`$name\` command. Use when the user asks to run \`$name\` or describes its purpose."
+        printf '%s\n' ""
+        printf '%s\n' "$body"
     )"
 
     if [ -f "$skill_file" ] && [ "$(cat "$skill_file")" = "$new_content" ]; then
