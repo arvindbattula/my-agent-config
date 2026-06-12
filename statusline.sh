@@ -39,7 +39,9 @@ if [ "$PARENT" = "/" ] || [ "$PARENT" = "." ]; then DIR_NAME="$BASE"; else DIR_N
 
 BRANCH=""
 if git -C "$DIR" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    BRANCH_NAME=$(git -C "$DIR" branch --show-current 2>/dev/null || echo "detached")
+    BRANCH_NAME=$(git -C "$DIR" branch --show-current 2>/dev/null)
+    # Detached HEAD: --show-current is empty (exit 0); fall back to short SHA.
+    [ -z "$BRANCH_NAME" ] && BRANCH_NAME=$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo "detached")
     STATUS_OUTPUT=$(git -C "$DIR" status --porcelain 2>/dev/null)
     if [ -n "$STATUS_OUTPUT" ]; then
         TOTAL_FILES=$(echo "$STATUS_OUTPUT" | wc -l | xargs)
