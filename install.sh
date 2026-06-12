@@ -636,9 +636,12 @@ sync_pi() {
             return 1
         fi
     fi
+
+    return 0
 }
 
 sync_pi
+pi_status=$?
 
 # Summary
 echo ""
@@ -655,3 +658,9 @@ if ! $STATUS_ONLY; then
     fi
 fi
 echo ""
+
+# Propagate Pi sync failure to the script exit code (visible in automation).
+if [ "$pi_status" -ne 0 ]; then
+    echo -e "${RED}Pi sync failed (exit $pi_status).${NC}"
+    exit "$pi_status"
+fi
