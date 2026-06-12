@@ -604,7 +604,14 @@ sync_pi() {
             echo -e "  ${YELLOW}!${NC} $name ${GRAY}(not symlinked — will link on sync)${NC}"
         elif $DRY_RUN; then
             echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ would symlink${NC}"
+        elif [ -e "$link" ] && [ ! -L "$link" ] && ! $FORCE; then
+            # A real (non-symlink) path exists here; refuse to destroy it silently.
+            echo -e "  ${RED}✗${NC} $name ${GRAY}(real path exists, not a symlink — skipped; use --force to replace)${NC}"
         else
+            # Back up any real path before replacing (symlinks are safe to drop).
+            if [ -e "$link" ] && [ ! -L "$link" ]; then
+                backup_file "$link"
+            fi
             rm -rf "$link"
             ln -s "$want" "$link"
             echo -e "  ${BLUE}↓${NC} $name ${GRAY}→ symlinked${NC}"
@@ -620,9 +627,14 @@ sync_pi() {
         echo -e "  ${GRAY}command-skills: $existing present, $cmd_count from commands/${NC}"
     else
         # Generator is idempotent and self-pruning: only writes changed skills
-        # and removes orphans whose command was deleted.
-        "$REPO_DIR/generate-pi-command-skills.sh" 2>/dev/null | sed 's/^/  /'
-        ((actions_taken++))
+        # and removes orphans whose command was deleted. Surface errors and
+        # abort Pi sync if it fails (don't mask with 2>/dev/null).
+        if "$REPO_DIR/generate-pi-command-skills.sh" 2>&1 | sed 's/^/  /'; then
+            ((actions_taken++))
+        else
+            echo -e "  ${RED}✗${NC} command-skill generation failed"
+            return 1
+        fi
     fi
 }
 
