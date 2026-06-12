@@ -96,11 +96,14 @@ function buildBar(percent: number, theme: Theme): string {
 }
 
 export default function (pi: ExtensionAPI) {
-	const sessionStart = Date.now();
-	let gitCache: { ts: number; stats: GitStats | null } | null = null;
-	let gitInFlight = false;
-
 	const install = (ctx: ExtensionContext) => {
+		// Reset per session_start so the timer and git cache reflect the current
+		// session, not the original extension load (session_start also fires on
+		// /new, /resume, and /fork without reloading the extension module).
+		const sessionStart = Date.now();
+		let gitCache: { ts: number; stats: GitStats | null } | null = null;
+		let gitInFlight = false;
+
 		ctx.ui.setFooter(
 			(
 				tui: { requestRender: () => void },
