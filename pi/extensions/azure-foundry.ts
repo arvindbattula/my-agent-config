@@ -10,10 +10,10 @@
 //   AZURE_FOUNDRY_ARM_RESOURCE_GROUP Azure resource group name
 //   AZURE_FOUNDRY_ARM_ACCOUNT        Azure Cognitive Services account name
 
-import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
+import { getAzureToken } from "./azure-token";
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -29,6 +29,17 @@ const ARM_RESOURCE_GROUP = requireEnv("AZURE_FOUNDRY_ARM_RESOURCE_GROUP");
 const ARM_ACCOUNT = requireEnv("AZURE_FOUNDRY_ARM_ACCOUNT");
 
 const CACHE_PATH = `${homedir()}/.pi/agent/extensions/azure-foundry-models.json`;
+
+const COGNITIVE_SERVICES_RESOURCE = "https://cognitiveservices.azure.com";
+const MANAGEMENT_RESOURCE = "https://management.azure.com";
+
+function getInferenceToken(): string {
+  return getAzureToken(COGNITIVE_SERVICES_RESOURCE);
+}
+
+function getArmToken(): string {
+  return getAzureToken(MANAGEMENT_RESOURCE);
+}
 
 // Anthropic published specs — Azure doesn't expose these via API.
 // Per-tier pricing in $/token. Source: Anthropic public list rates (cross-validated
@@ -72,40 +83,6 @@ function rateForModel(model: any): Cost {
     if (id.includes(name)) return spec.cost;
   }
   return ZERO_COST;
-}
-
-// ── Token caches ─────────────────────────────────────────────────────────────
-
-let inferenceToken: string | null = null;
-let inferenceTokenExpiry = 0;
-
-let armToken: string | null = null;
-let armTokenExpiry = 0;
-
-function getInferenceToken(): string {
-  const now = Date.now();
-  if (inferenceToken && now < inferenceTokenExpiry - 60_000) return inferenceToken;
-  const json = execSync(
-    "az account get-access-token --resource https://cognitiveservices.azure.com -o json",
-    { encoding: "utf-8", timeout: 15_000 }
-  );
-  const parsed = JSON.parse(json);
-  inferenceToken = parsed.accessToken;
-  inferenceTokenExpiry = new Date(parsed.expiresOn).getTime();
-  return inferenceToken!;
-}
-
-function getArmToken(): string {
-  const now = Date.now();
-  if (armToken && now < armTokenExpiry - 60_000) return armToken;
-  const json = execSync(
-    "az account get-access-token --resource https://management.azure.com -o json",
-    { encoding: "utf-8", timeout: 15_000 }
-  );
-  const parsed = JSON.parse(json);
-  armToken = parsed.accessToken;
-  armTokenExpiry = new Date(parsed.expiresOn).getTime();
-  return armToken!;
 }
 
 // ── Cache helpers ─────────────────────────────────────────────────────────────

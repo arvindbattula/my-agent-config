@@ -8,7 +8,6 @@
 //   AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID   Deployment ID for DeepSeek model
 //   AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID       Deployment ID for Kimi model
 
-import { execSync } from "node:child_process";
 import {
   streamSimpleOpenAICompletions,
   type AssistantMessageEventStream,
@@ -18,6 +17,7 @@ import {
   createAssistantMessageEventStream,
 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAzureToken } from "./azure-token";
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -27,27 +27,16 @@ function requireEnv(name: string): string {
 
 const BASE_URL = requireEnv("AZURE_FOUNDRY_OPENAI_BASE_URL");
 
+const COGNITIVE_SERVICES_RESOURCE = "https://cognitiveservices.azure.com";
+
 // Deployment IDs — configured via env vars to keep internal naming confidential.
-// Defaults are placeholders; set the actual deployment IDs in your environment.
-const MODEL_DEEPSEEK_ID = process.env.AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID || "deepseek-v4-pro";
-const MODEL_KIMI_ID = process.env.AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID || "kimi-k2-6";
+const MODEL_DEEPSEEK_ID = requireEnv("AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID");
+const MODEL_KIMI_ID = requireEnv("AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID");
 
-// ── Token cache ──────────────────────────────────────────────────────────────
-
-let token: string | null = null;
-let tokenExpiry = 0;
+// ── Token acquisition ───────────────────────────────────────────────────────
 
 function getAccessToken(): string {
-  const now = Date.now();
-  if (token && now < tokenExpiry - 60_000) return token;
-  const json = execSync(
-    "az account get-access-token --resource https://cognitiveservices.azure.com -o json",
-    { encoding: "utf-8", timeout: 15_000 },
-  );
-  const parsed = JSON.parse(json);
-  token = parsed.accessToken;
-  tokenExpiry = new Date(parsed.expiresOn).getTime();
-  return token!;
+  return getAzureToken(COGNITIVE_SERVICES_RESOURCE);
 }
 
 // ── Model definitions ────────────────────────────────────────────────────────

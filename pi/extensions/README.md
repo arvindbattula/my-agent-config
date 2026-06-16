@@ -4,6 +4,9 @@ Extensions for the [Pi coding agent](https://github.com/earendil-works/pi-coding
 
 ## Extensions
 
+### `azure-token.ts`
+Shared Entra ID token acquisition utility used by both Azure extensions. Caches tokens per resource with automatic refresh. Not a standalone provider — imported by the other extensions.
+
 ### `statusline.ts`
 Two-line status bar footer showing model, directory, git branch + diff stats, thinking level, context usage, tokens, cost, and session elapsed time.
 
@@ -54,3 +57,4 @@ az login
 - **No Azure identifiers in version control.** All subscription IDs, resource group names, account names, and endpoint URLs are configured via environment variables. Nothing sensitive is committed.
 - **Cache files stay local.** `azure-foundry-models.json` is a runtime artifact generated from live ARM discovery. It is gitignored and never committed.
 - **Cost data is public list pricing.** Per-token rates are sourced from Anthropic's published pricing and are estimates only. Actual Azure contract rates may differ.
+- **Non-Claude models are statically defined.** Unlike Claude models (discovered dynamically via ARM API), DeepSeek/Kimi models in `azure-openai-models.ts` are defined in a static `MODELS` array. This is deliberate — these models use a different API path (OpenAI-compat vs Anthropic) and their deployment list is small and stable. To add a new non-Claude model, edit the `MODELS` array and re-sync.
