@@ -87,7 +87,7 @@ const MODELS: AzureOpenAIModel[] = [
     reasoning: true,
     input: ["text"],
     contextWindow: 262144,
-    maxTokens: 262144,
+    maxTokens: 200000,
     cost: { input: 0.95, output: 4, cacheRead: 0, cacheWrite: 0 },
     compat: {
       supportsDeveloperRole: false,
