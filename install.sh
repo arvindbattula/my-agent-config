@@ -482,8 +482,10 @@ sync_single_file() {
 # ─── Main ───
 
 echo -e "${BOLD}my-agent-config sync${NC}"
-echo -e "${GRAY}Repo: $REPO_DIR${NC}"
-echo -e "${GRAY}Local: $CLAUDE_DIR${NC}"
+echo -e "${GRAY}Repo:    $REPO_DIR${NC}"
+echo -e "${GRAY}Claude:  $CLAUDE_DIR${NC}"
+[ -d "$HOME/.pi/agent" ] && echo -e "${GRAY}Pi ext:  $PI_EXTENSIONS${NC}"
+[ -d "$HOME/.agents" ] && echo -e "${GRAY}Pi skl:  $AGENTS_SKILLS${NC}"
 
 if $DRY_RUN; then
     echo -e "${YELLOW}(dry-run mode — no changes will be made)${NC}"
