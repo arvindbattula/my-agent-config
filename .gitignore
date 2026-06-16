@@ -3,3 +3,6 @@ rules-personal/
 bin/__pycache__/
 rules/parallel-web-search.md
 rules/pi-coding-agent.md
+
+# Pi extension — runtime cache, auto-generated from live Azure ARM discovery
+pi/extensions/azure-foundry-models.json
