@@ -17,7 +17,7 @@ import {
   createAssistantMessageEventStream,
 } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAzureToken } from "./azure-token";
+import { getAzureToken } from "./lib/azure-token";
 
 function requireEnv(name: string): string {
   const val = process.env[name];

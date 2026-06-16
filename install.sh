@@ -578,15 +578,19 @@ sync_pi_extensions() {
     print_header "Pi Extensions"
     mkdir -p "$PI_EXTENSIONS"
 
+    # Collect names recursively (paths relative to the extensions dir) so shared
+    # helpers under subdirs like extensions/lib/ are synced. Pi only treats a
+    # subdir as an extension if it has index.ts or a pi-manifest package.json, so
+    # a plain lib/ subdir is ignored by pi but still importable by extensions.
     local names=()
-    for f in "$REPO_DIR"/pi/extensions/*.ts; do
-        [ -f "$f" ] && names+=("$(basename "$f")")
-    done
-    for f in "$PI_EXTENSIONS"/*.ts; do
-        [ -f "$f" ] || continue
-        local n; n="$(basename "$f")"
+    while IFS= read -r f; do
+        [ -n "$f" ] && names+=("${f#"$REPO_DIR"/pi/extensions/}")
+    done < <(find "$REPO_DIR/pi/extensions" -type f -name '*.ts')
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        local n; n="${f#"$PI_EXTENSIONS"/}"
         [[ " ${names[*]:-} " =~ " $n " ]] || names+=("$n")
-    done
+    done < <(find "$PI_EXTENSIONS" -type f -name '*.ts')
 
     IFS=$'\n' names=($(sort <<<"${names[*]:-}")); unset IFS
 
@@ -594,6 +598,7 @@ sync_pi_extensions() {
         [ -n "$name" ] || continue
         local r="$REPO_DIR/pi/extensions/$name"
         local l="$PI_EXTENSIONS/$name"
+        mkdir -p "$(dirname "$l")"
         local status; status=$(compare_file "$r" "$l")
 
         case "$status" in
@@ -645,12 +650,39 @@ sync_pi_extensions() {
                 ((repo_only++))
                 ;;
             local_only)
+                # Stale-after-move detection: a local-only file whose basename now
+                # lives at a DIFFERENT path in the repo (e.g. azure-token.ts moved to
+                # lib/azure-token.ts) is a leftover from a repo-side relocation. Pi
+                # would still load the stale top-level copy as an extension and hit
+                # "valid factory function" errors, so offer to remove it (with backup)
+                # rather than the usual copy-up-to-repo prompt.
+                local moved_to rel
+                moved_to="$(find "$REPO_DIR/pi/extensions" -type f -name "$(basename "$name")" 2>/dev/null | head -1)"
+                rel="${moved_to#"$REPO_DIR"/pi/extensions/}"
+                if [ -n "$moved_to" ] && [ "$rel" != "$name" ]; then
+                    if $STATUS_ONLY; then
+                        echo -e "  ${YELLOW}!${NC} $name ${GRAY}(stale — moved to $rel in repo; will remove on sync)${NC}"
+                    elif $FORCE; then
+                        echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ removed (stale; moved to $rel)${NC}$($DRY_RUN && echo " (dry-run)")"
+                        if ! $DRY_RUN; then backup_file "$l"; rm -f "$l"; ((actions_taken++)); fi
+                    else
+                        echo -e "  ${YELLOW}!${NC} $name ${GRAY}(stale — moved to $rel in repo)${NC}"
+                        read -p "    [r]emove stale local file (backed up) / [s]kip? " choice
+                        case "$choice" in
+                            r|R) if ! $DRY_RUN; then backup_file "$l"; rm -f "$l"; ((actions_taken++)); fi
+                                 echo -e "    ${GREEN}→ removed (backup in $BACKUP_DIR)${NC}$($DRY_RUN && echo " (dry-run)")" ;;
+                            *) echo -e "    ${GRAY}→ skipped${NC}" ;;
+                        esac
+                    fi
+                    ((local_only++))
+                    continue
+                fi
                 if $STATUS_ONLY; then
                     echo -e "  ${CYAN}+${NC} $name ${GRAY}(local only)${NC}"
                 else
                     action=$(ask_action "$name" "local_only")
                     if [ "$action" = "to_repo" ]; then
-                        if ! $DRY_RUN; then cp "$l" "$r"; ((actions_taken++)); fi
+                        if ! $DRY_RUN; then mkdir -p "$(dirname "$r")"; cp "$l" "$r"; ((actions_taken++)); fi
                         echo -e "    ${GREEN}→ copied to repo${NC}$($DRY_RUN && echo " (dry-run)")"
                     fi
                 fi

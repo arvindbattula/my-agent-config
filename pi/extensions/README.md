@@ -4,8 +4,8 @@ Extensions for the [Pi coding agent](https://github.com/earendil-works/pi-coding
 
 ## Extensions
 
-### `azure-token.ts`
-Shared Entra ID token acquisition utility used by both Azure extensions. Caches tokens per resource with automatic refresh. Not a standalone provider — imported by the other extensions.
+### `lib/azure-token.ts`
+Shared Entra ID token acquisition utility used by both Azure extensions. Caches tokens per resource with automatic refresh. Not a standalone provider — imported by the other extensions. Lives under `lib/` on purpose: pi auto-loads **every top-level file** in `extensions/` as an extension (each must export a default factory), so shared helpers must sit in a subdirectory. A subdir without an `index.ts` or a pi-manifest `package.json` is ignored by pi's loader but stays importable (e.g. `from "./lib/azure-token"`).
 
 ### `statusline.ts`
 Two-line status bar footer showing model, directory, git branch + diff stats, thinking level, context usage, tokens, cost, and session elapsed time.
