@@ -89,7 +89,6 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `simplicity-over-cleverness` | Simplest solution that works, no over-engineering |
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
 | `minimal-diff` | Only change what's necessary; exception: update broken call sites directly |
-
 | `sunk-cost-breaker` | Stop after 3+ failed attempts; propose fresh restart with lessons learned |
 | `no-lint-suppression` | Fix lint/type errors, never suppress with eslint-disable or ts-ignore |
 | `no-backwards-compat` | No migration shims or compatibility wrappers unless explicitly asked |

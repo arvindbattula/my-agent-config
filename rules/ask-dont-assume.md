@@ -8,4 +8,4 @@ If the user says "plow ahead," "keep going," "don't ask questions," or "use your
 - Pick the smallest reversible choice that satisfies the request
 - Stop only on true blockers: missing credentials, destructive/irreversible actions (force push, production mutations, deletions), legal/safety/privacy risk, or decisions the user explicitly reserved
 - If blocked, leave a self-contained handoff: what was done, what blocks progress, what exact input is needed
-- End with a recap: goal completed, key decisions made (with reasons), changes, validation run, remaining risk
+- End with a recap: what was accomplished, key decisions made (with reasons), changes, validation run, remaining risk
