@@ -5,6 +5,14 @@ description: Multi-pass review of the current codebase
 
 Multi-pass review of the current codebase. Checks architecture, spec compliance, edge cases, code quality, and security. Outputs categorized findings and promotes broadly useful learnings to global memory.
 
+## Review Principles
+
+Apply these before and during the passes — they set the bar for what to flag and how to deliver it.
+
+- **Approval standard:** Approve a change when it *definitely improves overall code health*, even if imperfect. Perfect code doesn't exist. Don't block a change because it isn't how you would have written it — if it improves the codebase and follows the project's conventions, it passes. The passes below find issues; this principle decides which ones actually block.
+- **Honesty (no sycophancy):** Don't rubber-stamp and don't soften real issues. Quantify problems when possible ("this N+1 adds ~50ms per item" beats "this could be slow"). Push back directly on approaches with clear problems and propose alternatives. Sycophancy is a failure mode in review.
+- **Disagreement hierarchy:** When findings are contested, resolve in this order — (1) technical facts and data, (2) the project's style guide, (3) software-design principles, (4) codebase consistency. Comment on the code, not the author. If the author has full context and disagrees, defer gracefully.
+
 ## Prerequisites
 
 Read these files before starting:
