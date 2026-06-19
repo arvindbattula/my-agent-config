@@ -6,3 +6,6 @@ rules/pi-coding-agent.md
 
 # Pi extension — runtime cache, auto-generated from live Azure ARM discovery
 pi/extensions/azure-foundry-models.json
+
+# Pi Hindsight extension — per-machine, per-session memory state (regenerates)
+.pi/
