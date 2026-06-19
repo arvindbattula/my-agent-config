@@ -39,6 +39,7 @@ cd my-agent-config
 | `triage` | Investigate bugs, find root cause, create issue with TDD fix plan |
 | `diagram` | Render inline interactive visuals — SVG diagrams, HTML widgets, charts |
 | `electron-wrapper` | Wrap a web app into an Electron desktop app |
+| `read-the-damn-docs` | Web-search for current official docs before implementing external packages, APIs, or version-sensitive behavior. Prevents guessing from stale model memory. Includes memory feedback loop for documenting quirks. |
 
 ### Commands (user-invoked via `/`)
 
@@ -88,7 +89,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `simplicity-over-cleverness` | Simplest solution that works, no over-engineering |
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
 | `minimal-diff` | Only change what's necessary; exception: update broken call sites directly |
-| `check-docs-first` | Look up current docs for external libraries/APIs before writing code |
+
 | `sunk-cost-breaker` | Stop after 3+ failed attempts; propose fresh restart with lessons learned |
 | `no-lint-suppression` | Fix lint/type errors, never suppress with eslint-disable or ts-ignore |
 | `no-backwards-compat` | No migration shims or compatibility wrappers unless explicitly asked |
@@ -149,3 +150,5 @@ Skills originally ported from [brianlovin/agent-config](https://github.com/brian
 Security, debugging, API design, git workflow, performance, frontend UI, and shipping skills adapted from [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) — a production-grade engineering skills library for AI coding agents. Anti-rationalization tables and red flags patterns also drawn from that project.
 
 Design skills (`design-setup`, `design-review`, `design-polish`, `design-typography`) and the anti-pattern detection hook adapted from [pbakaus/impeccable](https://github.com/pbakaus/impeccable) (Apache 2.0) — a design skill system that teaches AI coding assistants real design principles.
+
+`read-the-damn-docs` skill adapted from [BuilderIO/skills](https://github.com/BuilderIO/skills) — extended with memory-first lookup and discovery feedback loop.
