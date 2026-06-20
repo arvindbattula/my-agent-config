@@ -93,6 +93,29 @@ todo list (above the editor) is separate and unaffected.
 - If the upstream example gains real fixes, merge them in manually, keeping the
   divergences above.
 
+### Post-PR review fixes (2026-06-20)
+Applied after Copilot PR review on https://github.com/arvindbattula/my-agent-config/pull/29.
+All fixed in both repo and `~/.pi/agent/extensions/`.
+
+1. **`NORMAL_MODE_TOOLS` restored full baseline tools** (`index.ts`)
+   Was `["read", "bash", "edit", "write"]` — exiting plan mode dropped
+   `grep`, `find`, `ls`, `questionnaire`. Now includes all baseline tools so
+   "Full access restored" is actually true.
+
+2. **`writePlanToFile()` timestamp collision** (`index.ts`)
+   Seconds-precision truncation (`slice(0, 19)`) caused overwrites if two
+   plans were generated within the same second. Switched to full ISO
+   millisecond precision and reused a single `Date` for filename + header.
+
+3. **Removed misleading "brave-search via bash" from plan-mode prompt** (`index.ts`)
+   The context prompt told the model to use web research via bash, but
+   network egress (`curl`, `wget`, etc.) is blocked in plan mode. This caused
+   repeated blocked-tool retries. Dropped the line entirely — local analysis
+   only in plan mode.
+
+4. **README typo: "question" → "questionnaire"** (`README.md`)
+   Docs mismatched the actual tool name.
+
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 
 These were considered and intentionally deferred to avoid speculative
