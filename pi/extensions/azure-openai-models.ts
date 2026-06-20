@@ -7,6 +7,7 @@
 //   AZURE_FOUNDRY_OPENAI_BASE_URL            OpenAI-compat API endpoint (e.g. https://<account>.services.ai.azure.com/openai/v1)
 //   AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID   Deployment ID for DeepSeek model
 //   AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID       Deployment ID for Kimi model
+//   AZURE_FOUNDRY_OPENAI_MODEL_GROQ_ID       Deployment ID for Groq model (optional)
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAzureToken } from "./lib/azure-token";
@@ -22,13 +23,16 @@ const COGNITIVE_SERVICES_RESOURCE = "https://cognitiveservices.azure.com";
 const MODEL_DEEPSEEK_ID = requireEnv("AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID");
 const MODEL_KIMI_ID = requireEnv("AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID");
 
+// Groq model — optional; falls back gracefully if env vars not set
+const MODEL_GROQ_ID = process.env["AZURE_FOUNDRY_OPENAI_MODEL_GROQ_ID"];
+
 function getAccessToken(): string {
   return getAzureToken(COGNITIVE_SERVICES_RESOURCE);
 }
 
 // ── Model definitions ────────────────────────────────────────────────────────
 
-const MODELS = [
+const BASE_MODELS = [
   {
     id: MODEL_DEEPSEEK_ID,
     name: "DeepSeek V4 Pro (Azure)",
@@ -57,11 +61,32 @@ const MODELS = [
       supportsDeveloperRole: false,
       maxTokensField: "max_tokens",
       supportsStore: false,
-      supportsReasoningEffort: false,
+      supportsReasoningEffort: true,
       supportsUsageInStreaming: true,
     },
   },
 ];
+
+const GROQ_MODEL = MODEL_GROQ_ID
+  ? {
+      id: MODEL_GROQ_ID,
+      name: "Grok Code Fast 1 (Azure)",
+      reasoning: false,
+      input: ["text"] as ("text" | "image")[],
+      contextWindow: 256000,
+      maxTokens: 8192,
+      cost: { input: 0.2, output: 1.5, cacheRead: 0, cacheWrite: 0 },
+      compat: {
+        supportsDeveloperRole: false,
+        maxTokensField: "max_tokens",
+        supportsStore: false,
+        supportsReasoningEffort: false,
+        supportsUsageInStreaming: true,
+      },
+    }
+  : undefined;
+
+const MODELS = GROQ_MODEL ? [...BASE_MODELS, GROQ_MODEL] : BASE_MODELS;
 
 // ── Message conversion ───────────────────────────────────────────────────────
 
@@ -155,59 +180,64 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
     };
     finalMessage = output;
 
-    const messages = convertMessages(context);
-    const tools = convertTools(context.tools);
-
-    const body: any = {
-      model: model.id,
-      messages,
-      stream: true,
-      stream_options: { include_usage: true },
-    };
-    if (options?.maxTokens) {
-      body[model.compat?.maxTokensField ?? "max_tokens"] = options.maxTokens;
-    }
-    if (tools.length > 0) body.tools = tools;
-
-    let response: Response;
     try {
-      const token = getAccessToken();
-      response = await fetch(`${BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-        signal: options?.signal,
-      });
-    } catch (err: any) {
-      output.stopReason = "error";
-      output.errorMessage = `Network error: ${err.message}`;
-      yield { type: "error", reason: "error", error: output };
-      return;
-    }
+      const messages = convertMessages(context);
+      const tools = convertTools(context.tools);
 
-    if (!response.ok) {
-      const errText = await response.text();
-      output.stopReason = "error";
-      output.errorMessage = `HTTP ${response.status}: ${errText}`;
-      yield { type: "error", reason: "error", error: output };
-      return;
-    }
+      const body: any = {
+        model: model.id,
+        messages,
+        stream: true,
+        stream_options: { include_usage: true },
+      };
+      const maxTokens = options?.maxTokens ?? model.maxTokens;
+      if (maxTokens) {
+        body[model.compat?.maxTokensField ?? "max_tokens"] = maxTokens;
+      }
+      if (options?.reasoningEffort && model.reasoning && model.compat?.supportsReasoningEffort) {
+        body.reasoning_effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
+      }
+      if (tools.length > 0) body.tools = tools;
 
-    yield { type: "start", partial: output };
+      let response: Response;
+      try {
+        const token = getAccessToken();
+        response = await fetch(`${BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+          signal: options?.signal,
+        });
+      } catch (err: any) {
+        output.stopReason = "error";
+        output.errorMessage = `Network error: ${err.message}`;
+        yield { type: "error", reason: "error", error: output };
+        return;
+      }
 
-    // Block tracking
-    let textBlock: any = null;
-    let thinkingBlock: any = null;
-    const toolCallsByIndex = new Map<number, any>();
+      if (!response.ok) {
+        const errText = await response.text();
+        output.stopReason = "error";
+        output.errorMessage = `HTTP ${response.status}: ${errText}`;
+        yield { type: "error", reason: "error", error: output };
+        return;
+      }
 
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+      yield { type: "start", partial: output };
 
-    while (true) {
+      // Block tracking
+      let textBlock: any = null;
+      let thinkingBlock: any = null;
+      const toolCallsByIndex = new Map<number, any>();
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -237,17 +267,15 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
         if (!choice) continue;
 
         // Finish reason
-        if (choice.finish_reason) {
-          switch (choice.finish_reason) {
-            case "stop": case "end": output.stopReason = "stop"; break;
-            case "length": output.stopReason = "length"; break;
-            case "tool_calls": output.stopReason = "toolUse"; break;
-            case "content_filter":
-              output.stopReason = "error";
-              output.errorMessage = "Content filter triggered";
-              break;
+          if (choice.finish_reason) {
+            switch (choice.finish_reason) {
+              case "stop": case "end": output.stopReason = "stop"; break;
+              case "length": output.stopReason = "length"; break;
+              case "tool_calls": output.stopReason = "toolUse"; break;
+              case "content_filter":
+                throw new Error("Provider finish_reason: content_filter");
+            }
           }
-        }
 
         const delta = choice.delta;
         if (!delta) continue;
@@ -317,7 +345,15 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       yield { type: "toolcall_end", contentIndex: output.content.indexOf(block), toolCall: block, partial: output };
     }
 
-    yield { type: "done", reason: output.stopReason, message: output };
+      yield { type: "done", reason: output.stopReason, message: output };
+    } catch (error) {
+      for (const block of output.content) {
+        delete block._rawArgs;
+      }
+      output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+      output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+      yield { type: "error", reason: output.stopReason, error: output };
+    }
   }
 
   const gen = generate();
