@@ -32,7 +32,6 @@ function writePlanToFile(planText: string): string {
 
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
-const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
 
 // Type guard for assistant messages
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -51,6 +50,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
+	/** Snapshot of active tools before plan mode was enabled. */
+	let normalModeTools: string[] | null = null;
 	// Dedupe block notifications: skip notifying if the same command was just blocked
 	// (the model often retries a rejected command several times).
 	let lastBlockedCommand: string | null = null;
@@ -95,10 +96,15 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		lastBlockedCommand = null;
 
 		if (planModeEnabled) {
+			// Snapshot current tools so we can restore them exactly on exit.
+			// This preserves any tools injected by core or other extensions.
+			normalModeTools = pi.getActiveTools();
 			pi.setActiveTools(PLAN_MODE_TOOLS);
 			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
 		} else {
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
+			pi.setActiveTools(restore);
+			normalModeTools = null;
 			ctx.ui.notify("Plan mode disabled. Full access restored.");
 		}
 		updateStatus(ctx);
@@ -249,7 +255,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				);
 				executionMode = false;
 				todoItems = [];
-				pi.setActiveTools(NORMAL_MODE_TOOLS);
+				const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
+				pi.setActiveTools(restore);
+				normalModeTools = null;
 				updateStatus(ctx);
 				persistState(); // Save cleared state so resume doesn't restore old execution mode
 			}
@@ -297,7 +305,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
 			executionMode = todoItems.length > 0;
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
+			pi.setActiveTools(restore);
+			normalModeTools = null;
 			updateStatus(ctx);
 
 			const execMessage =
@@ -362,6 +372,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		}
 
 		if (planModeEnabled) {
+			// Snapshot current tools before restricting, so we can restore them
+			// exactly when plan mode is disabled (preserves Hindsight tools, etc.).
+			normalModeTools = pi.getActiveTools();
 			pi.setActiveTools(PLAN_MODE_TOOLS);
 		}
 		updateStatus(ctx);

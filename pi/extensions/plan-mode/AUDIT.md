@@ -116,6 +116,23 @@ All fixed in both repo and `~/.pi/agent/extensions/`.
 4. **README typo: "question" → "questionnaire"** (`README.md`)
    Docs mismatched the actual tool name.
 
+### Tool-preservation fix (2026-06-20)
+
+5. **Hindsight tools lost on plan-mode exit** (`index.ts`)
+   When toggling plan mode off, `pi.setActiveTools(NORMAL_MODE_TOOLS)` was
+   called with a hardcoded list. Any tools not in that list — including the
+   Hindsight tools that pi injects — were silently dropped.
+
+   - Added `normalModeTools: string[] | null` to snapshot
+     `pi.getActiveTools()` when plan mode is enabled, in both
+     `togglePlanMode()` and `session_start`.
+   - On exit (toggle off, execute plan, or plan complete), restore the
+     exact snapshot: `pi.setActiveTools(normalModeTools ?? fallback)`.
+   - Falls back to a static list only if the snapshot is null (defensive).
+   
+   This pattern generalizes to any future tools injected by core or other
+   extensions — plan mode no longer needs to know every tool name.
+
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 
 These were considered and intentionally deferred to avoid speculative
