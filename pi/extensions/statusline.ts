@@ -101,8 +101,13 @@ export default function (pi: ExtensionAPI) {
 		// session, not the original extension load (session_start also fires on
 		// /new, /resume, and /fork without reloading the extension module).
 		const sessionStart = Date.now();
-		let gitCache: { ts: number; stats: GitStats | null } | null = null;
+		// Pre-seed with an expired timestamp so the first render triggers a git
+		// refresh immediately (no cold-start flicker of missing branch stats).
+		let gitCache: { ts: number; stats: GitStats | null } = { ts: -Infinity, stats: null };
 		let gitInFlight = false;
+		// Memoize cost: getBranch() is O(n) and render() fires on every text delta.
+		// Recompute only when the branch entry count changes.
+		let costCache = { entries: -1, total: 0 };
 
 		ctx.ui.setFooter(
 			(
@@ -115,7 +120,7 @@ export default function (pi: ExtensionAPI) {
 				},
 			) => {
 				const unsub = footerData.onBranchChange(() => {
-					gitCache = null;
+					gitCache = { ts: -Infinity, stats: null };
 					tui.requestRender();
 				});
 
@@ -135,18 +140,23 @@ export default function (pi: ExtensionAPI) {
 					render(width: number): string[] {
 						const branch = footerData.getGitBranch();
 
-						if (!gitCache || Date.now() - gitCache.ts > GIT_CACHE_MS) {
+						if (Date.now() - gitCache.ts > GIT_CACHE_MS) {
 							refreshGit(branch);
 						}
-						const stats = gitCache?.stats ?? null;
+						const stats = gitCache.stats;
 
-						// Cost from assistant usage on the current branch.
-						let cost = 0;
-						for (const entry of ctx.sessionManager.getBranch()) {
-							if (entry.type === "message" && entry.message.role === "assistant") {
-								cost += (entry.message as AssistantMessage).usage.cost.total;
+						// Cost from assistant usage on the current branch (memoized).
+						const branchEntries = ctx.sessionManager.getBranch();
+						if (branchEntries.length !== costCache.entries) {
+							let total = 0;
+							for (const entry of branchEntries) {
+								if (entry.type === "message" && entry.message.role === "assistant") {
+									total += (entry.message as AssistantMessage).usage.cost.total;
+								}
 							}
+							costCache = { entries: branchEntries.length, total };
 						}
+						const cost = costCache.total;
 
 						const usage = ctx.getContextUsage();
 						const tokens = usage?.tokens ?? 0;
