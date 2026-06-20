@@ -303,9 +303,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		]);
 
 		// Guard: state may have changed while the select dialog was open (e.g.
-		// user toggled plan mode via Ctrl+Alt+P shortcut). Abort if no longer
-		// in the expected state.
-		if (!planModeEnabled || todoItems.length === 0) return;
+		// user toggled plan mode via Ctrl+Alt+P shortcut).
+		if (!planModeEnabled) return;
 
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
@@ -317,7 +316,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 			const execMessage =
 				todoItems.length > 0
-					? `Execute the plan. Start with: ${todoItems[0].rawText}`
+					? `Execute the plan. Start with: ${todoItems[0].rawText ?? todoItems[0].text}`
 					: "Execute the plan you just created.";
 			pi.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
@@ -326,7 +325,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
 			// Guard: state may have changed while the editor dialog was open.
-			if (!planModeEnabled || todoItems.length === 0) return;
+			if (!planModeEnabled) return;
 			if (refinement?.trim()) {
 				pi.sendUserMessage(refinement.trim());
 			}
