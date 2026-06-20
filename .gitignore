@@ -9,3 +9,6 @@ pi/extensions/azure-foundry-models.json
 
 # Pi Hindsight extension — per-machine, per-session memory state (regenerates)
 .pi/
+
+# Plan-mode extension — auto-generated auditable plan artifacts
+PLAN-*.md

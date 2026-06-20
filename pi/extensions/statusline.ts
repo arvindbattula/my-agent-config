@@ -111,6 +111,7 @@ export default function (pi: ExtensionAPI) {
 				footerData: {
 					getGitBranch: () => string | null;
 					onBranchChange: (cb: () => void) => () => void;
+					getExtensionStatuses?: () => ReadonlyMap<string, string>;
 				},
 			) => {
 				const unsub = footerData.onBranchChange(() => {
@@ -178,10 +179,22 @@ export default function (pi: ExtensionAPI) {
 								? ` ${theme.fg("dim", "|")} ${theme.fg("accent", `⚙ ${thinking}`)}`
 								: "";
 
+						// Extension status indicators (e.g. plan-mode's "⏸ plan").
+						// setStatus() writes here; a custom footer must render them itself.
+						let extSeg = "";
+						const statuses = footerData.getExtensionStatuses?.();
+						if (statuses && statuses.size > 0) {
+							const parts = [...statuses.values()].filter((v) => v && v.length > 0);
+							if (parts.length > 0) {
+								extSeg = ` ${theme.fg("dim", "|")} ${parts.join(" ")}`;
+							}
+						}
+
 						const line1 =
 							`${theme.fg("accent", `[${modelName}]`)} ${theme.fg("text", "📁")} ${theme.fg("text", dir)}` +
 							branchSeg +
-							thinkingSeg;
+							thinkingSeg +
+							extSeg;
 
 						// --- Line 2: context bar, %, tokens, cost, duration ---
 						const bar = buildBar(percent, theme);

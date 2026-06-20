@@ -1,21 +1,13 @@
 // Azure AI Foundry OpenAI-compatible models extension
 // Handles non-Claude models (DeepSeek, Kimi, etc.) deployed as serverless MaaS
-// Uses pi-ai's built-in streamSimpleOpenAICompletions for streaming
-// Auth: Entra ID bearer tokens via `az cli` with automatic refresh
+// Uses raw fetch() against the OpenAI Chat Completions SSE endpoint with
+// Entra ID bearer tokens via `az cli` with automatic refresh.
 //
 // Configuration — set these env vars before launch:
 //   AZURE_FOUNDRY_OPENAI_BASE_URL            OpenAI-compat API endpoint (e.g. https://<account>.services.ai.azure.com/openai/v1)
 //   AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID   Deployment ID for DeepSeek model
 //   AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID       Deployment ID for Kimi model
 
-import {
-  streamSimpleOpenAICompletions,
-  type AssistantMessageEventStream,
-  type Context,
-  type Model,
-  type SimpleStreamOptions,
-  createAssistantMessageEventStream,
-} from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAzureToken } from "./lib/azure-token";
 
@@ -26,50 +18,22 @@ function requireEnv(name: string): string {
 }
 
 const BASE_URL = requireEnv("AZURE_FOUNDRY_OPENAI_BASE_URL");
-
 const COGNITIVE_SERVICES_RESOURCE = "https://cognitiveservices.azure.com";
-
-// Deployment IDs — configured via env vars to keep internal naming confidential.
 const MODEL_DEEPSEEK_ID = requireEnv("AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID");
 const MODEL_KIMI_ID = requireEnv("AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID");
-
-// ── Token acquisition ───────────────────────────────────────────────────────
 
 function getAccessToken(): string {
   return getAzureToken(COGNITIVE_SERVICES_RESOURCE);
 }
 
 // ── Model definitions ────────────────────────────────────────────────────────
-// Add new non-Claude Azure deployments here.
-// DeepSeek V4 Pro pricing: $1.74/$3.48 per 1M tokens (input/output)
-// Kimi K2.6 pricing: $0.95/$4 per 1M tokens (input/output)
-// NOTE: maxTokens = max OUTPUT tokens per response. Must be < contextWindow.
-//       Setting it equal to contextWindow causes "exceeds context length" errors
-//       because the API requires: input_tokens + max_tokens <= contextWindow.
 
-interface AzureOpenAIModel {
-  id: string;
-  name: string;
-  reasoning: boolean;
-  input: ("text" | "image")[];
-  contextWindow: number;
-  maxTokens: number;
-  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  compat: {
-    supportsDeveloperRole: boolean;
-    maxTokensField: string;
-    supportsStore: boolean;
-    supportsReasoningEffort: boolean;
-    supportsUsageInStreaming: boolean;
-  };
-}
-
-const MODELS: AzureOpenAIModel[] = [
+const MODELS = [
   {
     id: MODEL_DEEPSEEK_ID,
     name: "DeepSeek V4 Pro (Azure)",
     reasoning: false,
-    input: ["text"],
+    input: ["text"] as ("text" | "image")[],
     contextWindow: 1048576,
     maxTokens: 200000,
     cost: { input: 1.74, output: 3.48, cacheRead: 0, cacheWrite: 0 },
@@ -85,7 +49,7 @@ const MODELS: AzureOpenAIModel[] = [
     id: MODEL_KIMI_ID,
     name: "Kimi K2.6 (Azure)",
     reasoning: true,
-    input: ["text"],
+    input: ["text"] as ("text" | "image")[],
     contextWindow: 262144,
     maxTokens: 200000,
     cost: { input: 0.95, output: 4, cacheRead: 0, cacheWrite: 0 },
@@ -99,51 +63,266 @@ const MODELS: AzureOpenAIModel[] = [
   },
 ];
 
-// ── Stream wrapper ───────────────────────────────────────────────────────────
-// Injects a fresh Entra ID token before each request.
+// ── Message conversion ───────────────────────────────────────────────────────
 
-function streamAzureOpenAI(
-  model: Model<"openai-completions">,
-  context: Context,
-  options?: SimpleStreamOptions,
-): AssistantMessageEventStream {
-  const stream = createAssistantMessageEventStream();
+function convertMessages(context: any): any[] {
+  const params: any[] = [];
 
-  (async () => {
-    try {
-      const freshToken = getAccessToken();
-      const modelWithBase = { ...model, baseUrl: BASE_URL };
-      const innerStream = streamSimpleOpenAICompletions(modelWithBase, context, {
-        ...options,
-        apiKey: freshToken,
-        maxTokens: options?.maxTokens ?? model.maxTokens,
-      });
+  if (context.systemPrompt) {
+    params.push({ role: "system", content: context.systemPrompt });
+  }
 
-      for await (const event of innerStream) stream.push(event);
-      stream.end();
-    } catch (error) {
-      stream.push({
-        type: "error",
-        reason: "error",
-        error: {
-          role: "assistant",
-          content: [],
-          api: model.api,
-          provider: model.provider,
-          model: model.id,
-          usage: {
-            input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: "error",
-          errorMessage: error instanceof Error ? error.message : String(error),
-          timestamp: Date.now(),
-        },
-      });
-      stream.end();
+  for (const msg of context.messages ?? []) {
+    if (msg.role === "user") {
+      if (typeof msg.content === "string") {
+        params.push({ role: "user", content: msg.content });
+      } else {
+        const parts = (msg.content ?? [])
+          .filter((c: any) => c.type === "text")
+          .map((c: any) => ({ type: "text", text: c.text }));
+        if (parts.length > 0) params.push({ role: "user", content: parts });
+      }
+    } else if (msg.role === "assistant") {
+      const textParts = (msg.content ?? []).filter((c: any) => c.type === "text" && c.text.trim());
+      const text = textParts.map((c: any) => c.text).join("");
+      const toolCalls = (msg.content ?? []).filter((c: any) => c.type === "toolCall");
+
+      // Skip empty assistant messages with no tool calls
+      if (!text && toolCalls.length === 0) continue;
+
+      const assistantMsg: any = { role: "assistant", content: text || null };
+      if (toolCalls.length > 0) {
+        assistantMsg.tool_calls = toolCalls.map((tc: any) => ({
+          id: tc.id,
+          type: "function",
+          function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
+        }));
+      }
+      params.push(assistantMsg);
+    } else if (msg.role === "toolResult") {
+      const text = Array.isArray(msg.content)
+        ? msg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n")
+        : String(msg.content ?? "");
+      params.push({ role: "tool", content: text, tool_call_id: msg.toolCallId });
     }
-  })();
+    // Skip other roles (compactionSummary, custom, etc.)
+  }
 
+  return params;
+}
+
+function convertTools(tools: any[]): any[] {
+  return (tools ?? []).map((t: any) => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters ?? { type: "object", properties: {} },
+    },
+  }));
+}
+
+// ── Cost calculation ─────────────────────────────────────────────────────────
+
+function calculateCost(model: any, usage: any): void {
+  const u = usage;
+  u.cost.input = (model.cost.input / 1_000_000) * u.input;
+  u.cost.output = (model.cost.output / 1_000_000) * u.output;
+  u.cost.cacheRead = 0;
+  u.cost.cacheWrite = 0;
+  u.cost.total = u.cost.input + u.cost.output;
+}
+
+// ── SSE stream parser ────────────────────────────────────────────────────────
+
+function streamAzureOpenAI(model: any, context: any, options: any) {
+  let finalMessage: any = null;
+
+  async function* generate() {
+    const output: any = {
+      role: "assistant",
+      content: [],
+      api: "openai-completions",
+      provider: "azure-openai-models",
+      model: model.id,
+      usage: {
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
+    finalMessage = output;
+
+    const messages = convertMessages(context);
+    const tools = convertTools(context.tools);
+
+    const body: any = {
+      model: model.id,
+      messages,
+      max_tokens: options?.maxTokens ?? model.maxTokens ?? 4096,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+    if (tools.length > 0) body.tools = tools;
+
+    let response: Response;
+    try {
+      const token = getAccessToken();
+      response = await fetch(`${BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      });
+    } catch (err: any) {
+      output.stopReason = "error";
+      output.errorMessage = `Network error: ${err.message}`;
+      yield { type: "error", reason: "error", error: output };
+      return;
+    }
+
+    if (!response.ok) {
+      const errText = await response.text();
+      output.stopReason = "error";
+      output.errorMessage = `HTTP ${response.status}: ${errText}`;
+      yield { type: "error", reason: "error", error: output };
+      return;
+    }
+
+    yield { type: "start", partial: output };
+
+    // Block tracking
+    let textBlock: any = null;
+    let thinkingBlock: any = null;
+    const toolCallsByIndex = new Map<number, any>();
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") continue;
+
+        let chunk: any;
+        try { chunk = JSON.parse(data); } catch { continue; }
+
+        // Usage (final chunk with include_usage)
+        if (chunk.usage) {
+          const u = chunk.usage;
+          output.usage.input = u.prompt_tokens ?? 0;
+          output.usage.output = u.completion_tokens ?? 0;
+          output.usage.cacheRead = u.prompt_tokens_details?.cached_tokens ?? 0;
+          output.usage.totalTokens = output.usage.input + output.usage.output;
+          calculateCost(model, output.usage);
+        }
+
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+
+        // Finish reason
+        if (choice.finish_reason) {
+          switch (choice.finish_reason) {
+            case "stop": case "end": output.stopReason = "stop"; break;
+            case "length": output.stopReason = "length"; break;
+            case "tool_calls": output.stopReason = "toolUse"; break;
+            case "content_filter":
+              output.stopReason = "error";
+              output.errorMessage = "Content filter triggered";
+              break;
+          }
+        }
+
+        const delta = choice.delta;
+        if (!delta) continue;
+
+        // Text content
+        if (delta.content) {
+          if (!textBlock) {
+            textBlock = { type: "text", text: "" };
+            output.content.push(textBlock);
+            yield { type: "text_start", contentIndex: output.content.length - 1, partial: output };
+          }
+          textBlock.text += delta.content;
+          yield { type: "text_delta", contentIndex: output.content.indexOf(textBlock), delta: delta.content, partial: output };
+        }
+
+        // Reasoning / thinking content (Kimi uses reasoning_content)
+        const reasoning = delta.reasoning_content ?? delta.reasoning ?? delta.reasoning_text;
+        if (typeof reasoning === "string" && reasoning.length > 0) {
+          if (!thinkingBlock) {
+            thinkingBlock = { type: "thinking", thinking: "" };
+            output.content.push(thinkingBlock);
+            yield { type: "thinking_start", contentIndex: output.content.length - 1, partial: output };
+          }
+          thinkingBlock.thinking += reasoning;
+          yield { type: "thinking_delta", contentIndex: output.content.indexOf(thinkingBlock), delta: reasoning, partial: output };
+        }
+
+        // Tool calls
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            let block = toolCallsByIndex.get(idx);
+            if (!block) {
+              block = { type: "toolCall", id: tc.id ?? "", name: tc.function?.name ?? "", arguments: {}, _rawArgs: "" };
+              toolCallsByIndex.set(idx, block);
+              output.content.push(block);
+              yield { type: "toolcall_start", contentIndex: output.content.length - 1, partial: output };
+            }
+            if (tc.id && !block.id) block.id = tc.id;
+            if (tc.function?.name && !block.name) block.name = tc.function.name;
+
+            let argDelta = "";
+            if (tc.function?.arguments) {
+              argDelta = tc.function.arguments;
+              block._rawArgs += argDelta;
+              try { block.arguments = JSON.parse(block._rawArgs); } catch { /* partial JSON, keep accumulating */ }
+            }
+            yield { type: "toolcall_delta", contentIndex: output.content.indexOf(block), delta: argDelta, partial: output };
+          }
+        }
+      }
+    }
+
+    // End all open blocks
+    if (textBlock) {
+      yield { type: "text_end", contentIndex: output.content.indexOf(textBlock), content: textBlock.text, partial: output };
+    }
+    if (thinkingBlock) {
+      yield { type: "thinking_end", contentIndex: output.content.indexOf(thinkingBlock), content: thinkingBlock.thinking, partial: output };
+    }
+    for (const block of toolCallsByIndex.values()) {
+      // Final parse attempt and strip scratch buffer
+      if (block._rawArgs) {
+        try { block.arguments = JSON.parse(block._rawArgs); } catch { /* best-effort */ }
+      }
+      delete block._rawArgs;
+      yield { type: "toolcall_end", contentIndex: output.content.indexOf(block), toolCall: block, partial: output };
+    }
+
+    yield { type: "done", reason: output.stopReason, message: output };
+  }
+
+  const gen = generate();
+  const stream: any = {
+    [Symbol.asyncIterator]: () => gen,
+    result: async () => finalMessage ?? null,
+  };
   return stream;
 }
 
@@ -154,7 +333,7 @@ export default function (pi: ExtensionAPI) {
     api: "openai-completions",
     baseUrl: BASE_URL,
     apiKey: "entra-id",
-    models: MODELS.map(({ compat, ...model }) => ({ ...model, compat })),
+    models: MODELS,
     streamSimple: streamAzureOpenAI,
   });
 }
