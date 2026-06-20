@@ -161,10 +161,12 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
     const body: any = {
       model: model.id,
       messages,
-      max_tokens: options?.maxTokens ?? model.maxTokens ?? 4096,
       stream: true,
       stream_options: { include_usage: true },
     };
+    if (options?.maxTokens) {
+      body[model.compat?.maxTokensField ?? "max_tokens"] = options.maxTokens;
+    }
     if (tools.length > 0) body.tools = tools;
 
     let response: Response;
