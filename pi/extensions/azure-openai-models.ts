@@ -223,6 +223,7 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
         output.stopReason = "error";
         output.errorMessage = `HTTP ${response.status}: ${errText}`;
         yield { type: "error", reason: "error", error: output };
+        return;
       }
 
       yield { type: "start", partial: output };
