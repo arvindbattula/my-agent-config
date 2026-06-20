@@ -251,7 +251,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				const completedList = todoItems.map((t) => `~~${t.text}~~`).join("\n");
 				pi.sendMessage(
 					{ customType: "plan-complete", content: `**Plan Complete!** ✓\n\n${completedList}`, display: true },
-					{ triggerTurn: false },
+					{ triggerTurn: false, deliverAs: "followUp" },
 				);
 				executionMode = false;
 				todoItems = [];
@@ -292,7 +292,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
 					display: true,
 				},
-				{ triggerTurn: false },
+				{ triggerTurn: false, deliverAs: "followUp" },
 			);
 		}
 
@@ -301,6 +301,11 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			"Stay in plan mode",
 			"Refine the plan",
 		]);
+
+		// Guard: state may have changed while the select dialog was open (e.g.
+		// user toggled plan mode via Ctrl+Alt+P shortcut). Abort if no longer
+		// in the expected state.
+		if (!planModeEnabled || todoItems.length === 0) return;
 
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
@@ -312,7 +317,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 			const execMessage =
 				todoItems.length > 0
-					? `Execute the plan. Start with: ${todoItems[0].text}`
+					? `Execute the plan. Start with: ${todoItems[0].rawText}`
 					: "Execute the plan you just created.";
 			pi.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
@@ -320,6 +325,8 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			);
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
+			// Guard: state may have changed while the editor dialog was open.
+			if (!planModeEnabled || todoItems.length === 0) return;
 			if (refinement?.trim()) {
 				pi.sendUserMessage(refinement.trim());
 			}
@@ -327,8 +334,10 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	});
 
 	// Restore state on session start/resume
-	pi.on("session_start", async (_event, ctx) => {
-		if (pi.getFlag("plan") === true) {
+	pi.on("session_start", async (event, ctx) => {
+		// Apply --plan flag only on initial startup; on resume/fork/new the
+		// persisted session state should take precedence.
+		if (event.reason === "startup" && pi.getFlag("plan") === true) {
 			planModeEnabled = true;
 		}
 

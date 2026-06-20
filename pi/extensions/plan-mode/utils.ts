@@ -138,7 +138,10 @@ export function blockReason(command: string): string | null {
 
 export interface TodoItem {
 	step: number;
+	/** Cleaned, truncated text for UI display. */
 	text: string;
+	/** Original full step text for prompts. */
+	rawText: string;
 	completed: boolean;
 }
 
@@ -178,7 +181,7 @@ export function extractTodoItems(message: string): TodoItem[] {
 		if (text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-")) {
 			const cleaned = cleanStepText(text);
 			if (cleaned.length > 3) {
-				items.push({ step: items.length + 1, text: cleaned, completed: false });
+				items.push({ step: items.length + 1, text: cleaned, rawText: text, completed: false });
 			}
 		}
 	}
