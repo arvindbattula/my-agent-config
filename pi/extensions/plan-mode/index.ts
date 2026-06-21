@@ -17,7 +17,7 @@ import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { writeFileSync } from "node:fs";
-import { blockReason, extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.ts";
+import { blockReason, extractTodoItems, markCompletedSteps, type TodoItem } from "./utils.ts";
 
 // Local addition (see AUDIT.md): persist a captured plan to a timestamped
 // markdown file in cwd so plans are auditable artifacts, not just session state.
@@ -327,7 +327,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			// Guard: state may have changed while the editor dialog was open.
 			if (!planModeEnabled) return;
 			if (refinement?.trim()) {
-				pi.sendUserMessage(refinement.trim());
+				// agent_end still counts as streaming, so deliverAs is required to queue
+				// the refinement as a follow-up turn instead of throwing.
+				pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
 			}
 		}
 	});
