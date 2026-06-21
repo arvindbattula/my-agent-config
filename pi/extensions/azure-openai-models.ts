@@ -57,6 +57,7 @@ const BASE_MODELS = [
     contextWindow: 262144,
     maxTokens: 200000,
     cost: { input: 0.95, output: 4, cacheRead: 0, cacheWrite: 0 },
+    thinkingLevelMap: { low: "low", medium: "medium", high: "high" } as Record<string, string>,
     compat: {
       supportsDeveloperRole: false,
       maxTokensField: "max_tokens",
@@ -178,8 +179,6 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       stopReason: "stop",
       timestamp: Date.now(),
     };
-    finalMessage = output;
-
     try {
       const messages = convertMessages(context);
       const tools = convertTools(context.tools);
@@ -238,35 +237,35 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       let buffer = "";
 
       while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") continue;
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") continue;
 
-        let chunk: any;
-        try { chunk = JSON.parse(data); } catch { continue; }
+          let chunk: any;
+          try { chunk = JSON.parse(data); } catch { continue; }
 
-        // Usage (final chunk with include_usage)
-        if (chunk.usage) {
-          const u = chunk.usage;
-          output.usage.input = u.prompt_tokens ?? 0;
-          output.usage.output = u.completion_tokens ?? 0;
-          output.usage.cacheRead = u.prompt_tokens_details?.cached_tokens ?? 0;
-          output.usage.totalTokens = output.usage.input + output.usage.output;
-          calculateCost(model, output.usage);
-        }
+          // Usage (final chunk with include_usage)
+          if (chunk.usage) {
+            const u = chunk.usage;
+            output.usage.input = u.prompt_tokens ?? 0;
+            output.usage.output = u.completion_tokens ?? 0;
+            output.usage.cacheRead = u.prompt_tokens_details?.cached_tokens ?? 0;
+            output.usage.totalTokens = output.usage.input + output.usage.output;
+            calculateCost(model, output.usage);
+          }
 
-        const choice = chunk.choices?.[0];
-        if (!choice) continue;
+          const choice = chunk.choices?.[0];
+          if (!choice) continue;
 
-        // Finish reason
+          // Finish reason
           if (choice.finish_reason) {
             switch (choice.finish_reason) {
               case "stop": case "end": output.stopReason = "stop"; break;
@@ -277,74 +276,75 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
             }
           }
 
-        const delta = choice.delta;
-        if (!delta) continue;
+          const delta = choice.delta;
+          if (!delta) continue;
 
-        // Text content
-        if (delta.content) {
-          if (!textBlock) {
-            textBlock = { type: "text", text: "" };
-            output.content.push(textBlock);
-            yield { type: "text_start", contentIndex: output.content.length - 1, partial: output };
-          }
-          textBlock.text += delta.content;
-          yield { type: "text_delta", contentIndex: output.content.indexOf(textBlock), delta: delta.content, partial: output };
-        }
-
-        // Reasoning / thinking content (Kimi uses reasoning_content)
-        const reasoning = delta.reasoning_content ?? delta.reasoning ?? delta.reasoning_text;
-        if (typeof reasoning === "string" && reasoning.length > 0) {
-          if (!thinkingBlock) {
-            thinkingBlock = { type: "thinking", thinking: "" };
-            output.content.push(thinkingBlock);
-            yield { type: "thinking_start", contentIndex: output.content.length - 1, partial: output };
-          }
-          thinkingBlock.thinking += reasoning;
-          yield { type: "thinking_delta", contentIndex: output.content.indexOf(thinkingBlock), delta: reasoning, partial: output };
-        }
-
-        // Tool calls
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            let block = toolCallsByIndex.get(idx);
-            if (!block) {
-              block = { type: "toolCall", id: tc.id ?? "", name: tc.function?.name ?? "", arguments: {}, _rawArgs: "" };
-              toolCallsByIndex.set(idx, block);
-              output.content.push(block);
-              yield { type: "toolcall_start", contentIndex: output.content.length - 1, partial: output };
+          // Text content
+          if (delta.content) {
+            if (!textBlock) {
+              textBlock = { type: "text", text: "" };
+              output.content.push(textBlock);
+              yield { type: "text_start", contentIndex: output.content.length - 1, partial: output };
             }
-            if (tc.id && !block.id) block.id = tc.id;
-            if (tc.function?.name && !block.name) block.name = tc.function.name;
+            textBlock.text += delta.content;
+            yield { type: "text_delta", contentIndex: output.content.indexOf(textBlock), delta: delta.content, partial: output };
+          }
 
-            let argDelta = "";
-            if (tc.function?.arguments) {
-              argDelta = tc.function.arguments;
-              block._rawArgs += argDelta;
-              try { block.arguments = JSON.parse(block._rawArgs); } catch { /* partial JSON, keep accumulating */ }
+          // Reasoning / thinking content (Kimi uses reasoning_content)
+          const reasoning = delta.reasoning_content ?? delta.reasoning ?? delta.reasoning_text;
+          if (typeof reasoning === "string" && reasoning.length > 0) {
+            if (!thinkingBlock) {
+              thinkingBlock = { type: "thinking", thinking: "" };
+              output.content.push(thinkingBlock);
+              yield { type: "thinking_start", contentIndex: output.content.length - 1, partial: output };
             }
-            yield { type: "toolcall_delta", contentIndex: output.content.indexOf(block), delta: argDelta, partial: output };
+            thinkingBlock.thinking += reasoning;
+            yield { type: "thinking_delta", contentIndex: output.content.indexOf(thinkingBlock), delta: reasoning, partial: output };
+          }
+
+          // Tool calls
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              let block = toolCallsByIndex.get(idx);
+              if (!block) {
+                block = { type: "toolCall", id: tc.id ?? "", name: tc.function?.name ?? "", arguments: {}, _rawArgs: "" };
+                toolCallsByIndex.set(idx, block);
+                output.content.push(block);
+                yield { type: "toolcall_start", contentIndex: output.content.length - 1, partial: output };
+              }
+              if (tc.id && !block.id) block.id = tc.id;
+              if (tc.function?.name && !block.name) block.name = tc.function.name;
+
+              let argDelta = "";
+              if (tc.function?.arguments) {
+                argDelta = tc.function.arguments;
+                block._rawArgs += argDelta;
+                try { block.arguments = JSON.parse(block._rawArgs); } catch { /* partial JSON, keep accumulating */ }
+              }
+              yield { type: "toolcall_delta", contentIndex: output.content.indexOf(block), delta: argDelta, partial: output };
+            }
           }
         }
       }
-    }
 
-    // End all open blocks
-    if (textBlock) {
-      yield { type: "text_end", contentIndex: output.content.indexOf(textBlock), content: textBlock.text, partial: output };
-    }
-    if (thinkingBlock) {
-      yield { type: "thinking_end", contentIndex: output.content.indexOf(thinkingBlock), content: thinkingBlock.thinking, partial: output };
-    }
-    for (const block of toolCallsByIndex.values()) {
-      // Final parse attempt and strip scratch buffer
-      if (block._rawArgs) {
-        try { block.arguments = JSON.parse(block._rawArgs); } catch { /* best-effort */ }
+      // End all open blocks
+      if (textBlock) {
+        yield { type: "text_end", contentIndex: output.content.indexOf(textBlock), content: textBlock.text, partial: output };
       }
-      delete block._rawArgs;
-      yield { type: "toolcall_end", contentIndex: output.content.indexOf(block), toolCall: block, partial: output };
-    }
+      if (thinkingBlock) {
+        yield { type: "thinking_end", contentIndex: output.content.indexOf(thinkingBlock), content: thinkingBlock.thinking, partial: output };
+      }
+      for (const block of toolCallsByIndex.values()) {
+        // Final parse attempt and strip scratch buffer
+        if (block._rawArgs) {
+          try { block.arguments = JSON.parse(block._rawArgs); } catch { /* best-effort */ }
+        }
+        delete block._rawArgs;
+        yield { type: "toolcall_end", contentIndex: output.content.indexOf(block), toolCall: block, partial: output };
+      }
 
+      finalMessage = output;
       yield { type: "done", reason: output.stopReason, message: output };
     } catch (error) {
       for (const block of output.content) {
