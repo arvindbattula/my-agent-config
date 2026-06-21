@@ -339,7 +339,13 @@ export default async function (pi: any) {
             const maxTokens = body.max_tokens;
             const effortMap: Record<string, number> = { low: 0.25, medium: 0.5, high: 0.75 };
             const ratio = effortMap[effort] ?? 0.5;
-            const budget = Math.max(1024, Math.min(maxTokens - 1, Math.floor(maxTokens * ratio)));
+            // Clamp order matters: compute proportional budget first, then cap at
+            // maxTokens-1 (Anthropic requires budget < max_tokens), then floor at
+            // 1024. When maxTokens <= 1024 the floor is skipped to keep budget < maxTokens.
+            const raw = Math.floor(maxTokens * ratio);
+            const budget = maxTokens > 1024
+              ? Math.max(1024, Math.min(maxTokens - 1, raw))
+              : Math.min(maxTokens - 1, raw);
             body.thinking = { type: "enabled", budget_tokens: budget };
           }
         }
@@ -434,7 +440,11 @@ export default async function (pi: any) {
 
               case "content_block_delta": {
                 const delta = event.delta;
-                const index = output.content.findIndex((b: any) => b.index === event.index);
+                // O(1) fast-path: the block at event.index was pushed in order so its
+                // transient .index field matches; fall back to findIndex only if not.
+                let index = event.index < output.content.length && output.content[event.index]?.index === event.index
+                  ? event.index
+                  : output.content.findIndex((b: any) => b.index === event.index);
                 const block = output.content[index];
                 if (!block) break;
                 if (delta.type === "text_delta" && block.type === "text") {
@@ -454,7 +464,10 @@ export default async function (pi: any) {
               }
 
               case "content_block_stop": {
-                const index = output.content.findIndex((b: any) => b.index === event.index);
+                // O(1) fast-path with findIndex fallback (mirrors content_block_delta).
+                let index = event.index < output.content.length && output.content[event.index]?.index === event.index
+                  ? event.index
+                  : output.content.findIndex((b: any) => b.index === event.index);
                 const block = output.content[index];
                 if (!block) break;
                 delete block.index;

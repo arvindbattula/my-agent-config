@@ -179,6 +179,7 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       stopReason: "stop",
       timestamp: Date.now(),
     };
+    finalMessage = output;
     try {
       const messages = convertMessages(context);
       const tools = convertTools(context.tools);
