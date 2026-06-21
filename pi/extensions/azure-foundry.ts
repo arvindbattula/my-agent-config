@@ -60,18 +60,32 @@ const ZERO_COST: Cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 // Keyed by the underlying model name returned in deployment.properties.model.name.
 // Only needs updating when a genuinely new model family ships with different limits.
-const MODEL_SPECS: Record<string, { contextWindow: number; maxTokens: number; reasoning: boolean; cost: Cost }> = {
-  "claude-haiku-4-5":  { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: HAIKU_COST  },
-  "claude-sonnet-4-5": { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: SONNET_COST },
-  "claude-sonnet-4-6": { contextWindow: 200000, maxTokens: 16384, reasoning: true,  cost: SONNET_COST },
-  "claude-opus-4-5":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
-  "claude-opus-4-6":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
-  "claude-opus-4-7":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
-  "claude-opus-4-8":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
-  "claude-fable-5":    { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
+// `adaptive` mirrors pi-ai's compat.forceAdaptiveThinking: these models reject
+// thinking.type="enabled" (budget-based) and require thinking.type="adaptive" with
+// output_config.effort. `xhighEffort` is the effort name a model accepts for the
+// pi "xhigh" level (from pi-ai's per-model thinkingLevelMap); other levels use the
+// minimal/low→low, medium→medium, high→high fallback.
+type Spec = {
+  contextWindow: number;
+  maxTokens: number;
+  reasoning: boolean;
+  cost: Cost;
+  adaptive?: boolean;
+  xhighEffort?: string;
 };
 
-const SPEC_DEFAULTS = { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: ZERO_COST };
+const MODEL_SPECS: Record<string, Spec> = {
+  "claude-haiku-4-5":  { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: HAIKU_COST  },
+  "claude-sonnet-4-5": { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: SONNET_COST },
+  "claude-sonnet-4-6": { contextWindow: 200000, maxTokens: 16384, reasoning: true,  cost: SONNET_COST, adaptive: true, xhighEffort: "xhigh" },
+  "claude-opus-4-5":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
+  "claude-opus-4-6":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
+  "claude-opus-4-7":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
+  "claude-opus-4-8":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
+  "claude-fable-5":    { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
+};
+
+const SPEC_DEFAULTS: Spec = { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: ZERO_COST };
 
 // Resolve per-token rates for a deployment id by matching the underlying model
 // name in MODEL_SPECS. Used so cost works even if a model came from a stale
@@ -83,6 +97,20 @@ function rateForModel(model: any): Cost {
     if (id.includes(name)) return spec.cost;
   }
   return ZERO_COST;
+}
+
+// Resolve thinking spec for a model. Prefers the fields built onto the model object,
+// but falls back to a MODEL_SPECS lookup by id so models loaded from an older cache
+// (built before these fields existed) still get the correct thinking mode.
+function thinkingSpecForModel(model: any): { adaptive: boolean; xhighEffort?: string } {
+  if (typeof model?.adaptiveThinking === "boolean") {
+    return { adaptive: model.adaptiveThinking, xhighEffort: model.xhighEffort };
+  }
+  const id: string = model?.id ?? "";
+  for (const [name, spec] of Object.entries(MODEL_SPECS)) {
+    if (id.includes(name)) return { adaptive: spec.adaptive ?? false, xhighEffort: spec.xhighEffort };
+  }
+  return { adaptive: false };
 }
 
 // ── Cache helpers ─────────────────────────────────────────────────────────────
@@ -135,6 +163,8 @@ function buildModel(deploymentName: string, underlyingModelName: string): any {
     contextWindow: spec.contextWindow,
     maxTokens: spec.maxTokens,
     cost: spec.cost,
+    adaptiveThinking: spec.adaptive ?? false,
+    xhighEffort: spec.xhighEffort,
   };
 }
 
@@ -265,13 +295,20 @@ export default async function (pi: any) {
                 if (c.type === "text") return { type: "text", text: c.text };
                 if (c.type === "thinking") {
                   // Redacted thinking: pass the opaque payload back as redacted_thinking.
-                  if (c.redacted) return { type: "redacted_thinking", data: c.thinkingSignature };
+                  // Drop it if the data is missing/empty — Anthropic rejects a
+                  // redacted_thinking block without a data payload.
+                  if (c.redacted) {
+                    if (!c.thinkingSignature || !String(c.thinkingSignature).trim()) return null;
+                    return { type: "redacted_thinking", data: c.thinkingSignature };
+                  }
                   if (!c.thinking || !c.thinking.trim()) return null;
                   // Anthropic requires a valid signature to replay a thinking block (notably
                   // for interleaved-thinking across tool-use turns). Without one (e.g. aborted
-                  // stream), fall back to plain text rather than dropping the block.
+                  // stream), fall back to plain text rather than dropping the block. Tag the
+                  // fallback so the ordering guard below can drop it if a signed thinking
+                  // block exists in the same turn (Anthropic requires thinking to be first).
                   if (!c.thinkingSignature || !c.thinkingSignature.trim())
-                    return { type: "text", text: c.thinking };
+                    return { type: "text", text: c.thinking, __thinkingFallback: true };
                   return { type: "thinking", thinking: c.thinking, signature: c.thinkingSignature };
                 }
                 if (c.type === "toolCall")
@@ -279,7 +316,24 @@ export default async function (pi: any) {
                 return null;
               })
               .filter(Boolean);
-            if (content.length > 0) rawMapped.push({ role: "assistant", content });
+            // Ordering guard: when thinking is replayed, Anthropic requires the first block of
+            // the assistant turn to be thinking/redacted_thinking. If a signatureless thinking
+            // block was converted to text and a real thinking block also exists, drop the text
+            // fallback so it can't precede (or split) the required first thinking block.
+            const hasRealThinking = content.some(
+              (c: any) => c.type === "thinking" || c.type === "redacted_thinking",
+            );
+            const ordered = (hasRealThinking
+              ? content.filter((c: any) => !c.__thinkingFallback)
+              : content
+            ).map((c: any) => {
+              if (c.__thinkingFallback) {
+                const { __thinkingFallback, ...rest } = c;
+                return rest;
+              }
+              return c;
+            });
+            if (ordered.length > 0) rawMapped.push({ role: "assistant", content: ordered });
           } else if (m.role === "toolResult") {
             let resultContent: any = String(m.content ?? "");
             if (typeof m.content === "string") resultContent = m.content;
@@ -333,20 +387,58 @@ export default async function (pi: any) {
         // Anthropic extended thinking — must be explicitly requested for reasoning models.
         // Without this, reasoning-capable models (Sonnet 4.6, Opus 4.5+) silently fall back
         // to standard completion with no extended thinking.
-        if (model.reasoning) {
-          const effort = options?.reasoningEffort;
-          if (effort && effort !== "off") {
-            const maxTokens = body.max_tokens;
-            const effortMap: Record<string, number> = { low: 0.25, medium: 0.5, high: 0.75 };
-            const ratio = effortMap[effort] ?? 0.5;
-            // Clamp order matters: compute proportional budget first, then cap at
-            // maxTokens-1 (Anthropic requires budget < max_tokens), then floor at
-            // 1024. When maxTokens <= 1024 the floor is skipped to keep budget < maxTokens.
-            const raw = Math.floor(maxTokens * ratio);
-            const budget = maxTokens > 1024
-              ? Math.max(1024, Math.min(maxTokens - 1, raw))
-              : Math.min(maxTokens - 1, raw);
-            body.thinking = { type: "enabled", budget_tokens: budget };
+        //
+        // pi passes the thinking level on SimpleStreamOptions.reasoning (a ThinkingLevel:
+        // minimal | low | medium | high | xhigh) and is undefined when thinking is off.
+        // The budget math mirrors pi-ai's native adjustMaxTokensForThinking so this provider
+        // behaves like the built-in Anthropic provider.
+        if (model.reasoning && options?.reasoning) {
+          const level = options.reasoning;
+          const { adaptive, xhighEffort } = thinkingSpecForModel(model);
+          if (adaptive) {
+            // Adaptive-thinking models (Sonnet 4.6, Opus 4.6+, Fable 5) reject
+            // thinking.type="enabled". Claude decides the budget; we pass an effort
+            // level via output_config. Mirrors pi-ai mapThinkingLevelToEffort: the
+            // model-specific xhigh effort name, else minimal/low→low, medium→medium,
+            // high (and any unknown)→high.
+            let effort: string;
+            switch (level) {
+              case "minimal":
+              case "low":
+                effort = "low"; break;
+              case "medium":
+                effort = "medium"; break;
+              case "xhigh":
+                effort = xhighEffort ?? "high"; break;
+              default:
+                effort = "high";
+            }
+            body.thinking = { type: "adaptive", display: "summarized" };
+            body.output_config = { effort };
+          } else {
+            // Budget-based thinking for older models (e.g. Opus 4.5).
+            // pi-ai default per-level budgets, overridable via options.thinkingBudgets.
+            // xhigh is clamped to high (no separate xhigh budget), matching clampReasoning().
+            const defaultBudgets: Record<string, number> = { minimal: 1024, low: 2048, medium: 8192, high: 16384 };
+            const budgets = { ...defaultBudgets, ...(options.thinkingBudgets ?? {}) };
+            const clampedLevel = level === "xhigh" ? "high" : level;
+            let thinkingBudget = budgets[clampedLevel];
+            if (typeof thinkingBudget === "number") {
+              const minOutputTokens = 1024;
+              const modelMaxTokens = model.maxTokens ?? 4096;
+              // Caller cap (options.maxTokens) is undefined when no explicit cap is set; then
+              // use the model cap directly, otherwise fit the budget inside the requested cap.
+              const baseMaxTokens = options.maxTokens;
+              const maxTokens = baseMaxTokens === undefined
+                ? modelMaxTokens
+                : Math.min(baseMaxTokens + thinkingBudget, modelMaxTokens);
+              if (maxTokens <= thinkingBudget) {
+                thinkingBudget = Math.max(0, maxTokens - minOutputTokens);
+              }
+              body.max_tokens = maxTokens;
+              // display "summarized" matches pi-ai's default for Claude 4 models.
+              body.thinking = { type: "enabled", budget_tokens: thinkingBudget || 1024, display: "summarized" };
+            }
           }
         }
 
