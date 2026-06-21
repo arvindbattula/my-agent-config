@@ -177,16 +177,21 @@ export function extractTodoItems(message: string): TodoItem[] {
 	const numberedPattern = /^\s*(\d+)[.)]\s+([^\n]+)/gm;
 
 	for (const match of planSection.matchAll(numberedPattern)) {
-		// Strip balanced bold spans anywhere (not just edges) so trailing text
-		// after a bold span survives, and lone '*' (e.g. *.py globs) is preserved.
-		const text = match[2]
-			.trim()
-			.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1")
-			.trim();
-		if (text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-")) {
-			const cleaned = cleanStepText(text);
+		// Keep rawText as the unmodified captured line (preserves emphasis/code
+		// markers for prompts). Strip balanced bold spans only for the guard checks
+		// and UI text, so trailing text after a bold span survives and lone '*'
+		// (e.g. *.py globs) is preserved.
+		const rawText = match[2].trim();
+		const stripped = rawText.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").trim();
+		if (
+			stripped.length > 5 &&
+			!stripped.startsWith("`") &&
+			!stripped.startsWith("/") &&
+			!stripped.startsWith("-")
+		) {
+			const cleaned = cleanStepText(stripped);
 			if (cleaned.length > 3) {
-				items.push({ step: items.length + 1, text: cleaned, rawText: text, completed: false });
+				items.push({ step: items.length + 1, text: cleaned, rawText, completed: false });
 			}
 		}
 	}

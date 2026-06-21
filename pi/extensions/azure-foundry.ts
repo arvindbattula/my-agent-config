@@ -436,8 +436,14 @@ export default async function (pi: any) {
                 thinkingBudget = Math.max(0, maxTokens - minOutputTokens);
               }
               body.max_tokens = maxTokens;
+              // Anthropic requires budget_tokens < max_tokens. Floor at 1024 only when
+              // there's room above it; otherwise clamp to maxTokens - 1 so a tiny
+              // max_tokens (e.g. caller passes 0) can't produce budget >= max_tokens.
+              const budget = maxTokens > 1024
+                ? Math.max(1024, Math.min(thinkingBudget, maxTokens - 1))
+                : Math.min(thinkingBudget, maxTokens - 1);
               // display "summarized" matches pi-ai's default for Claude 4 models.
-              body.thinking = { type: "enabled", budget_tokens: thinkingBudget || 1024, display: "summarized" };
+              body.thinking = { type: "enabled", budget_tokens: budget, display: "summarized" };
             }
           }
         }
