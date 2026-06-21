@@ -116,7 +116,7 @@ export default function (pi: ExtensionAPI) {
 				footerData: {
 					getGitBranch: () => string | null;
 					onBranchChange: (cb: () => void) => () => void;
-					getExtensionStatuses?: () => ReadonlyMap<string, string>;
+					getExtensionStatuses: () => ReadonlyMap<string, string>;
 				},
 			) => {
 				let disposed = false;
@@ -166,7 +166,7 @@ export default function (pi: ExtensionAPI) {
 
 						const modelName = ctx.model?.name ?? "?";
 						const dir = shortenDir(ctx.cwd);
-						const thinking = pi.getThinkingLevel?.() ?? "";
+						const thinking = pi.getThinkingLevel();
 
 						// --- Line 1: model, dir, branch, thinking ---
 						let branchSeg = "";
@@ -187,15 +187,15 @@ export default function (pi: ExtensionAPI) {
 						}
 
 						const thinkingSeg =
-							thinking && thinking !== "off"
+							thinking !== "off"
 								? ` ${theme.fg("dim", "|")} ${theme.fg("accent", `⚙ ${thinking}`)}`
 								: "";
 
 						// Extension status indicators (e.g. plan-mode's "⏸ plan").
 						// setStatus() writes here; a custom footer must render them itself.
 						let extSeg = "";
-						const statuses = footerData.getExtensionStatuses?.();
-						if (statuses && statuses.size > 0) {
+						const statuses = footerData.getExtensionStatuses();
+						if (statuses.size > 0) {
 							const parts = [...statuses.values()].filter((v) => v && v.length > 0);
 							if (parts.length > 0) {
 								extSeg = ` ${theme.fg("dim", "|")} ${parts.join(" ")}`;

@@ -171,17 +171,27 @@ export function extractTodoItems(message: string): TodoItem[] {
 	if (!headerMatch) return items;
 
 	const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
-	const numberedPattern = /^\s*(\d+)[.)]\s+\*{0,2}([^*\n]+)/gm;
+	// Capture the full line and let cleanStepText strip markdown. Handling
+	// bold here (\*{0,2} + [^*\n]) truncated steps at the first '*', dropping
+	// any text after a bold span (e.g. "**Read the file** and analyze it").
+	const numberedPattern = /^\s*(\d+)[.)]\s+([^\n]+)/gm;
 
 	for (const match of planSection.matchAll(numberedPattern)) {
-		const text = match[2]
-			.trim()
-			.replace(/\*{1,2}$/, "")
-			.trim();
-		if (text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-")) {
-			const cleaned = cleanStepText(text);
+		// Keep rawText as the unmodified captured line (preserves emphasis/code
+		// markers for prompts). Strip balanced bold spans only for the guard checks
+		// and UI text, so trailing text after a bold span survives and lone '*'
+		// (e.g. *.py globs) is preserved.
+		const rawText = match[2].trim();
+		const stripped = rawText.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").trim();
+		if (
+			stripped.length > 5 &&
+			!stripped.startsWith("`") &&
+			!stripped.startsWith("/") &&
+			!stripped.startsWith("-")
+		) {
+			const cleaned = cleanStepText(stripped);
 			if (cleaned.length > 3) {
-				items.push({ step: items.length + 1, text: cleaned, rawText: text, completed: false });
+				items.push({ step: items.length + 1, text: cleaned, rawText, completed: false });
 			}
 		}
 	}
