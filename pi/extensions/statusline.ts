@@ -119,23 +119,25 @@ export default function (pi: ExtensionAPI) {
 					getExtensionStatuses?: () => ReadonlyMap<string, string>;
 				},
 			) => {
+				let disposed = false;
 				const unsub = footerData.onBranchChange(() => {
 					gitCache = { ts: -Infinity, stats: null };
-					tui.requestRender();
+					if (!disposed) tui.requestRender();
 				});
 
 				const refreshGit = (branch: string | null) => {
-					if (gitInFlight) return;
+					if (gitInFlight || disposed) return;
 					gitInFlight = true;
 					void collectGitStats(ctx.cwd, branch).then((stats) => {
-						gitCache = { ts: Date.now(), stats };
 						gitInFlight = false;
+						if (disposed) return;
+						gitCache = { ts: Date.now(), stats };
 						tui.requestRender();
 					});
 				};
 
 				return {
-					dispose: unsub,
+					dispose() { disposed = true; unsub(); },
 					invalidate() {},
 					render(width: number): string[] {
 						const branch = footerData.getGitBranch();
