@@ -263,6 +263,17 @@ export default async function (pi: any) {
             const content = (m.content ?? [])
               .map((c: any) => {
                 if (c.type === "text") return { type: "text", text: c.text };
+                if (c.type === "thinking") {
+                  // Redacted thinking: pass the opaque payload back as redacted_thinking.
+                  if (c.redacted) return { type: "redacted_thinking", data: c.thinkingSignature };
+                  if (!c.thinking || !c.thinking.trim()) return null;
+                  // Anthropic requires a valid signature to replay a thinking block (notably
+                  // for interleaved-thinking across tool-use turns). Without one (e.g. aborted
+                  // stream), fall back to plain text rather than dropping the block.
+                  if (!c.thinkingSignature || !c.thinkingSignature.trim())
+                    return { type: "text", text: c.thinking };
+                  return { type: "thinking", thinking: c.thinking, signature: c.thinkingSignature };
+                }
                 if (c.type === "toolCall")
                   return { type: "tool_use", id: c.id, name: c.name, input: c.arguments ?? {} };
                 return null;
@@ -319,6 +330,20 @@ export default async function (pi: any) {
         if (context.systemPrompt) body.system = context.systemPrompt;
         if (tools.length > 0) body.tools = tools;
 
+        // Anthropic extended thinking — must be explicitly requested for reasoning models.
+        // Without this, reasoning-capable models (Sonnet 4.6, Opus 4.5+) silently fall back
+        // to standard completion with no extended thinking.
+        if (model.reasoning) {
+          const effort = options?.reasoningEffort;
+          if (effort && effort !== "off") {
+            const maxTokens = body.max_tokens;
+            const effortMap: Record<string, number> = { low: 0.25, medium: 0.5, high: 0.75 };
+            const ratio = effortMap[effort] ?? 0.5;
+            const budget = Math.max(1024, Math.min(maxTokens - 1, Math.floor(maxTokens * ratio)));
+            body.thinking = { type: "enabled", budget_tokens: budget };
+          }
+        }
+
         let response: Response;
         try {
           const token = getInferenceToken();
@@ -328,6 +353,8 @@ export default async function (pi: any) {
               "Content-Type": "application/json",
               "Authorization": `Bearer ${token}`,
               "anthropic-version": ANTHROPIC_VERSION,
+              // Required to replay thinking blocks across tool-use turns.
+              "anthropic-beta": "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
             },
             body: JSON.stringify(body),
           });
@@ -348,7 +375,6 @@ export default async function (pi: any) {
 
         yield { type: "start", partial: output };
 
-        const blocks: any[] = [];
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -382,41 +408,63 @@ export default async function (pi: any) {
               case "content_block_start": {
                 const cb = event.content_block;
                 const idx = event.index;
+                // Blocks carry a transient `index` so deltas can be matched by
+                // Anthropic's content_block index (stripped at content_block_stop).
                 if (cb.type === "text") {
-                  const block = { type: "text", text: "" };
-                  blocks[idx] = block;
-                  output.content.push(block);
+                  output.content.push({ type: "text", text: "", index: idx });
                   yield { type: "text_start", contentIndex: output.content.length - 1, partial: output };
+                } else if (cb.type === "thinking") {
+                  output.content.push({ type: "thinking", thinking: "", thinkingSignature: "", index: idx });
+                  yield { type: "thinking_start", contentIndex: output.content.length - 1, partial: output };
+                } else if (cb.type === "redacted_thinking") {
+                  output.content.push({
+                    type: "thinking",
+                    thinking: "[Reasoning redacted]",
+                    thinkingSignature: cb.data,
+                    redacted: true,
+                    index: idx,
+                  });
+                  yield { type: "thinking_start", contentIndex: output.content.length - 1, partial: output };
                 } else if (cb.type === "tool_use") {
-                  const block = { type: "toolCall", id: cb.id, name: cb.name, arguments: {} };
-                  blocks[idx] = { piBlock: block, rawJson: "" };
-                  output.content.push(block);
+                  output.content.push({ type: "toolCall", id: cb.id, name: cb.name, arguments: {}, rawJson: "", index: idx });
                   yield { type: "toolcall_start", contentIndex: output.content.length - 1, partial: output };
                 }
                 break;
               }
 
               case "content_block_delta": {
-                const idx = event.index;
                 const delta = event.delta;
-                if (delta.type === "text_delta" && blocks[idx]?.text !== undefined) {
-                  blocks[idx].text += delta.text;
-                  yield { type: "text_delta", contentIndex: output.content.indexOf(blocks[idx]), delta: delta.text, partial: output };
-                } else if (delta.type === "input_json_delta" && blocks[idx]?.rawJson !== undefined) {
-                  blocks[idx].rawJson += delta.partial_json;
-                  try { blocks[idx].piBlock.arguments = JSON.parse(blocks[idx].rawJson); } catch {}
-                  yield { type: "toolcall_delta", contentIndex: output.content.indexOf(blocks[idx].piBlock), delta: delta.partial_json, partial: output };
+                const index = output.content.findIndex((b: any) => b.index === event.index);
+                const block = output.content[index];
+                if (!block) break;
+                if (delta.type === "text_delta" && block.type === "text") {
+                  block.text += delta.text;
+                  yield { type: "text_delta", contentIndex: index, delta: delta.text, partial: output };
+                } else if (delta.type === "thinking_delta" && block.type === "thinking") {
+                  block.thinking += delta.thinking;
+                  yield { type: "thinking_delta", contentIndex: index, delta: delta.thinking, partial: output };
+                } else if (delta.type === "signature_delta" && block.type === "thinking") {
+                  block.thinkingSignature = (block.thinkingSignature || "") + delta.signature;
+                } else if (delta.type === "input_json_delta" && block.type === "toolCall") {
+                  block.rawJson += delta.partial_json;
+                  try { block.arguments = JSON.parse(block.rawJson); } catch {}
+                  yield { type: "toolcall_delta", contentIndex: index, delta: delta.partial_json, partial: output };
                 }
                 break;
               }
 
               case "content_block_stop": {
-                const idx = event.index;
-                if (blocks[idx]?.text !== undefined) {
-                  yield { type: "text_end", contentIndex: output.content.indexOf(blocks[idx]), partial: output };
-                } else if (blocks[idx]?.piBlock) {
-                  const piBlock = blocks[idx].piBlock;
-                  yield { type: "toolcall_end", contentIndex: output.content.indexOf(piBlock), toolCall: piBlock, partial: output };
+                const index = output.content.findIndex((b: any) => b.index === event.index);
+                const block = output.content[index];
+                if (!block) break;
+                delete block.index;
+                if (block.type === "text") {
+                  yield { type: "text_end", contentIndex: index, content: block.text, partial: output };
+                } else if (block.type === "thinking") {
+                  yield { type: "thinking_end", contentIndex: index, content: block.thinking, partial: output };
+                } else if (block.type === "toolCall") {
+                  delete block.rawJson;
+                  yield { type: "toolcall_end", contentIndex: index, toolCall: block, partial: output };
                 }
                 break;
               }
