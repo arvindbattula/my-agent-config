@@ -71,7 +71,7 @@ const BASE_MODELS = [
 const GROQ_MODEL = MODEL_GROQ_ID
   ? {
       id: MODEL_GROQ_ID,
-      name: "Grok Code Fast 1 (Azure)",
+      name: "Groq Code Fast 1 (Azure)",
       reasoning: false,
       input: ["text"] as ("text" | "image")[],
       contextWindow: 256000,
