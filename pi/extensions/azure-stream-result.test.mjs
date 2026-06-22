@@ -9,7 +9,12 @@
 // This test drives the REAL extension streamSimple with network disabled, so a
 // future revert of the fix (result returning null without iteration) fails here.
 //
-// Run: node pi/extensions/azure-stream-result.test.mjs
+// Requires Node's native TypeScript type stripping to import the .ts extensions:
+// on by default on Node >= 23.6, or via --experimental-strip-types on 22.6-23.5.
+// (ts-resolve-hook.mjs only handles extensionless import resolution, not parsing.)
+//
+// Run (Node >= 23.6):       node pi/extensions/azure-stream-result.test.mjs
+// Run (Node 22.6-23.5):     node --experimental-strip-types pi/extensions/azure-stream-result.test.mjs
 
 import assert from "node:assert/strict";
 import { register } from "node:module";
