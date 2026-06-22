@@ -133,6 +133,61 @@ All fixed in both repo and `~/.pi/agent/extensions/`.
    This pattern generalizes to any future tools injected by core or other
    extensions — plan mode no longer needs to know every tool name.
 
+### Progress widget lingered after execution (FIXED 2026-06-22)
+
+**Symptom:** After choosing "Execute the plan (track progress)", the `setWidget`
+todo checklist above the editor did not disappear when the model finished the
+work. It only cleared one cycle later — after the next user message + model
+response.
+
+**Root cause:** Execution teardown (clear widget, exit `executionMode`, restore
+tools) was gated entirely on `todoItems.every((t) => t.completed)` in
+`agent_end`. Steps are only marked complete by the model emitting a `[DONE:n]`
+tag (`markCompletedSteps` in `turn_end`). Models routinely finish the run
+without tagging the final step(s), so `every()` stayed false and the widget was
+never torn down. On the next turn, `before_agent_start` re-injects the
+"Remaining steps … include a `[DONE:n]` tag" reminder; the model then emits the
+missing tag(s), and the *following* `agent_end` finally cleared the widget —
+hence the one-cycle lag.
+
+**Evidence:** across recorded sessions, the structured `"executing":false`
+teardown marker is present iff the session contains `[DONE:n]` tags. Sessions
+with zero `[DONE:n]` tags never persisted `"executing":false` (widget never
+cleared). The footer `⏸ plan`/`📋 N/M` indicator was NOT the culprit —
+`statusline.ts` reads `getExtensionStatuses()` live in `render()`, and
+`setWidget`/`setStatus` both call `requestRender()`.
+
+**Fix (`index.ts`):** decoupled teardown from per-step tagging. Refactored the
+all-complete block into a `finalizePlan(ctx, allDone)` helper, then in
+`agent_end`: when the run goes idle with steps still untagged and a UI is
+present, prompt `["End execution (clear tracker)", "Keep tracking (still executing)"]`.
+"End execution" clears the widget immediately; "Keep tracking"/Escape leaves
+it (legitimate mid-plan pause). The fully-tagged path is unchanged (still
+auto-finalizes — no regression), and headless/no-UI auto-finalizes rather than
+hanging on a select.
+
+**Tradeoff:** if the model pauses mid-plan to ask a clarifying question, the
+finalize prompt appears alongside that question (one extra keypress: "Keep
+tracking"). Accepted as rare vs. the guaranteed stale-widget bug. If this
+friction shows up, switch to auto-finalize-on-idle (clear unless the final
+message ends in a question) — lower friction, slightly heuristic.
+
+**Post-PR-review fixes (PR #36, Copilot):**
+1. Renamed the finalize option `"Mark plan complete"` → `"End execution (clear
+   tracker)"`. The old label was misleading: on an untagged run `finalizePlan`
+   posts the neutral "Plan execution ended." header with unchecked items shown,
+   so nothing is actually "marked complete". Label now matches behavior.
+2. `finalizePlan` restored tools via `normalModeTools ?? <hardcoded list>`, but
+   `normalModeTools` is null by the time execution ends (nulled when execution
+   started), so it fell back to the hardcoded list and dropped injected tools
+   (e.g. Hindsight) — re-introducing the exact regression item #5 above fixed.
+   This was pre-existing in the original all-complete branch, but the new
+   untagged-finalize path broadens its trigger. Fix: `finalizePlan` always runs
+   in normal (non-plan) mode, so the live tool set is already correct — fall
+   back to `pi.getActiveTools()` (a no-op that preserves injected tools) instead
+   of a hardcoded list. Scoped to `finalizePlan` only; the other two call sites
+   keep the hardcoded fallback because there the live tools are `PLAN_MODE_TOOLS`.
+
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 
 These were considered and intentionally deferred to avoid speculative

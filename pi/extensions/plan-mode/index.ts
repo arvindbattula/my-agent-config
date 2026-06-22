@@ -118,6 +118,33 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		});
 	}
 
+	/**
+	 * Tear down execution mode: post a summary, clear the progress widget, and
+	 * restore the pre-plan tool set. Used both when every step is tagged [DONE:n]
+	 * and when the user explicitly finalizes a run that left steps untagged.
+	 */
+	function finalizePlan(ctx: ExtensionContext, allDone: boolean): void {
+		const summary = todoItems.map((t) => (t.completed ? `~~${t.text}~~` : `☐ ${t.text}`)).join("\n");
+		const header = allDone ? "**Plan Complete!** ✓" : "**Plan execution ended.**";
+		pi.sendMessage(
+			{ customType: "plan-complete", content: `${header}\n\n${summary}`, display: true },
+			{ triggerTurn: false, deliverAs: "followUp" },
+		);
+		executionMode = false;
+		todoItems = [];
+		// Execution always runs in normal (non-plan) mode — the Execute branch exited
+		// plan mode and restored tools when execution began — so the live tool set is
+		// already correct, including anything injected by core/other extensions. Fall
+		// back to the live set (not a hardcoded list) so we never clobber injected
+		// tools (e.g. Hindsight). normalModeTools is null in the normal flow; the ??
+		// only guards a hypothetical non-null snapshot.
+		const restore = normalModeTools ?? pi.getActiveTools();
+		pi.setActiveTools(restore);
+		normalModeTools = null;
+		updateStatus(ctx);
+		persistState(); // Save cleared state so resume doesn't restore old execution mode
+	}
+
 	pi.registerCommand("plan", {
 		description: "Toggle plan mode (read-only exploration)",
 		handler: async (_args, ctx) => togglePlanMode(ctx),
@@ -247,20 +274,23 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	pi.on("agent_end", async (event, ctx) => {
 		// Check if execution is complete
 		if (executionMode && todoItems.length > 0) {
-			if (todoItems.every((t) => t.completed)) {
-				const completedList = todoItems.map((t) => `~~${t.text}~~`).join("\n");
-				pi.sendMessage(
-					{ customType: "plan-complete", content: `**Plan Complete!** ✓\n\n${completedList}`, display: true },
-					{ triggerTurn: false, deliverAs: "followUp" },
+			const allDone = todoItems.every((t) => t.completed);
+			// The agent run has gone idle. If every step carries a [DONE:n] tag we
+			// finalize automatically (original behavior). If not, the model finished
+			// the run without tagging every step (common) — without intervention the
+			// progress widget would linger until some later turn happened to emit the
+			// missing tag. Prompt the user instead of leaving a stale widget.
+			if (!allDone && ctx.hasUI) {
+				const completed = todoItems.filter((t) => t.completed).length;
+				const choice = await ctx.ui.select(
+					`Plan execution finished (${completed}/${todoItems.length} steps tagged done) — what next?`,
+					["End execution (clear tracker)", "Keep tracking (still executing)"],
 				);
-				executionMode = false;
-				todoItems = [];
-				const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
-				pi.setActiveTools(restore);
-				normalModeTools = null;
-				updateStatus(ctx);
-				persistState(); // Save cleared state so resume doesn't restore old execution mode
+				// State may have changed while the dialog was open.
+				if (!executionMode) return;
+				if (choice !== "End execution (clear tracker)") return;
 			}
+			finalizePlan(ctx, allDone);
 			return;
 		}
 
