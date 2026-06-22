@@ -160,8 +160,8 @@ cleared). The footer `⏸ plan`/`📋 N/M` indicator was NOT the culprit —
 **Fix (`index.ts`):** decoupled teardown from per-step tagging. Refactored the
 all-complete block into a `finalizePlan(ctx, allDone)` helper, then in
 `agent_end`: when the run goes idle with steps still untagged and a UI is
-present, prompt `["Mark plan complete", "Keep tracking (still executing)"]`.
-"Mark plan complete" clears the widget immediately; "Keep tracking"/Escape leaves
+present, prompt `["End execution (clear tracker)", "Keep tracking (still executing)"]`.
+"End execution" clears the widget immediately; "Keep tracking"/Escape leaves
 it (legitimate mid-plan pause). The fully-tagged path is unchanged (still
 auto-finalizes — no regression), and headless/no-UI auto-finalizes rather than
 hanging on a select.
@@ -171,6 +171,22 @@ finalize prompt appears alongside that question (one extra keypress: "Keep
 tracking"). Accepted as rare vs. the guaranteed stale-widget bug. If this
 friction shows up, switch to auto-finalize-on-idle (clear unless the final
 message ends in a question) — lower friction, slightly heuristic.
+
+**Post-PR-review fixes (PR #36, Copilot):**
+1. Renamed the finalize option `"Mark plan complete"` → `"End execution (clear
+   tracker)"`. The old label was misleading: on an untagged run `finalizePlan`
+   posts the neutral "Plan execution ended." header with unchecked items shown,
+   so nothing is actually "marked complete". Label now matches behavior.
+2. `finalizePlan` restored tools via `normalModeTools ?? <hardcoded list>`, but
+   `normalModeTools` is null by the time execution ends (nulled when execution
+   started), so it fell back to the hardcoded list and dropped injected tools
+   (e.g. Hindsight) — re-introducing the exact regression item #5 above fixed.
+   This was pre-existing in the original all-complete branch, but the new
+   untagged-finalize path broadens its trigger. Fix: `finalizePlan` always runs
+   in normal (non-plan) mode, so the live tool set is already correct — fall
+   back to `pi.getActiveTools()` (a no-op that preserves injected tools) instead
+   of a hardcoded list. Scoped to `finalizePlan` only; the other two call sites
+   keep the hardcoded fallback because there the live tools are `PLAN_MODE_TOOLS`.
 
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 

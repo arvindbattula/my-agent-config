@@ -132,7 +132,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		);
 		executionMode = false;
 		todoItems = [];
-		const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
+		// Execution always runs in normal (non-plan) mode — the Execute branch exited
+		// plan mode and restored tools when execution began — so the live tool set is
+		// already correct, including anything injected by core/other extensions. Fall
+		// back to the live set (not a hardcoded list) so we never clobber injected
+		// tools (e.g. Hindsight). normalModeTools is null in the normal flow; the ??
+		// only guards a hypothetical non-null snapshot.
+		const restore = normalModeTools ?? pi.getActiveTools();
 		pi.setActiveTools(restore);
 		normalModeTools = null;
 		updateStatus(ctx);
@@ -278,11 +284,11 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				const completed = todoItems.filter((t) => t.completed).length;
 				const choice = await ctx.ui.select(
 					`Plan execution finished (${completed}/${todoItems.length} steps tagged done) — what next?`,
-					["Mark plan complete", "Keep tracking (still executing)"],
+					["End execution (clear tracker)", "Keep tracking (still executing)"],
 				);
 				// State may have changed while the dialog was open.
 				if (!executionMode) return;
-				if (choice !== "Mark plan complete") return;
+				if (choice !== "End execution (clear tracker)") return;
 			}
 			finalizePlan(ctx, allDone);
 			return;
