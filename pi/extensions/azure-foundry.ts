@@ -607,9 +607,23 @@ export default async function (pi: any) {
       }
 
       const gen = generate();
+      // result() must return the finalized message even when pi never iterates the
+      // async iterator (compaction and branch summarization call result() directly —
+      // see compaction.ts/branch-summarization.ts). finalMessage is only populated as a
+      // side effect of running the generator, so drive it to completion here. Memoized
+      // and safe in the normal turn path, where the agent loop iterates fully and then
+      // calls result() sequentially (never concurrently with iteration).
+      let driven: Promise<any> | null = null;
+      const drive = () =>
+        (driven ??= (async () => {
+          while (!(await gen.next()).done) {
+            /* drain; no-op if external iteration already exhausted the generator */
+          }
+          return finalMessage ?? null;
+        })());
       const stream: any = {
         [Symbol.asyncIterator]: () => gen,
-        result: async () => finalMessage ?? null,
+        result: () => drive(),
       };
       return stream;
     },
