@@ -358,9 +358,22 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
   }
 
   const gen = generate();
+  // result() must return the finalized message even when pi never iterates the
+  // async iterator (compaction and branch summarization call result() directly).
+  // finalMessage is only populated as a side effect of running the generator, so
+  // drive it to completion here. Memoized and safe in the normal turn path, where
+  // the agent loop iterates fully and then calls result() sequentially.
+  let driven: Promise<any> | null = null;
+  const drive = () =>
+    (driven ??= (async () => {
+      while (!(await gen.next()).done) {
+        /* drain; no-op if external iteration already exhausted the generator */
+      }
+      return finalMessage ?? null;
+    })());
   const stream: any = {
     [Symbol.asyncIterator]: () => gen,
-    result: async () => finalMessage ?? null,
+    result: () => drive(),
   };
   return stream;
 }
