@@ -32,6 +32,19 @@ function writePlanToFile(planText: string): string {
 
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
+// Built-in tools disabled in plan mode. Everything else that is currently active
+// (e.g. Hindsight memory tools) stays available so the agent can recall/retain
+// context while planning. NOTE: the bash allowlist (utils.ts) only constrains
+// SHELL commands to local read-only; it does not sandbox the preserved tools.
+// Injected tools keep their own capabilities and may perform network/side-
+// effecting I/O. Plan mode disables built-in edit/write — not all egress.
+const PLAN_MODE_DISABLED_TOOLS = new Set<string>(["edit", "write"]);
+
+// Plan-mode tool set = the current active tools minus the disabled built-ins,
+// with the read-only baseline guaranteed present. Preserves injected tools.
+function getPlanModeTools(activeTools: string[]): string[] {
+	return [...new Set([...activeTools.filter((t) => !PLAN_MODE_DISABLED_TOOLS.has(t)), ...PLAN_MODE_TOOLS])];
+}
 
 // Type guard for assistant messages
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -99,8 +112,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			// Snapshot current tools so we can restore them exactly on exit.
 			// This preserves any tools injected by core or other extensions.
 			normalModeTools = pi.getActiveTools();
-			pi.setActiveTools(PLAN_MODE_TOOLS);
-			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
+			pi.setActiveTools(getPlanModeTools(normalModeTools));
+			ctx.ui.notify("Plan mode enabled. Built-in edit/write disabled; other tools (incl. memory) preserved.");
 		} else {
 			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
 			pi.setActiveTools(restore);
@@ -220,9 +233,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 You are in plan mode - a read-only exploration mode for safe code analysis.
 
 Restrictions:
-- You can only use: read, bash, grep, find, ls, questionnaire
-- You CANNOT use: edit, write (file modifications are disabled)
-- Bash is restricted to an allowlist of read-only commands
+- Built-in edit and write tools are disabled (no file modifications)
+- Other active tools remain available (read, bash, grep, find, ls, questionnaire, memory tools)
+- Bash is restricted to an allowlist of read-only, local shell commands (no network via the shell)
+- Other active tools keep their normal capabilities (memory tools may read/write their own store)
 
 Ask clarifying questions using the questionnaire tool.
 
@@ -313,21 +327,24 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			}
 		}
 
+		// No plan was produced (e.g. the model asked a clarifying question or only
+		// explored) — stay in plan mode silently rather than prompting "what next?"
+		// with nothing to execute.
+		if (todoItems.length === 0) return;
+
 		// Show plan steps and prompt for next action
-		if (todoItems.length > 0) {
-			const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
-			pi.sendMessage(
-				{
-					customType: "plan-todo-list",
-					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
-					display: true,
-				},
-				{ triggerTurn: false, deliverAs: "followUp" },
-			);
-		}
+		const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
+		pi.sendMessage(
+			{
+				customType: "plan-todo-list",
+				content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
+				display: true,
+			},
+			{ triggerTurn: false, deliverAs: "followUp" },
+		);
 
 		const choice = await ctx.ui.select("Plan mode - what next?", [
-			todoItems.length > 0 ? "Execute the plan (track progress)" : "Execute the plan",
+			"Execute the plan (track progress)",
 			"Stay in plan mode",
 			"Refine the plan",
 		]);
@@ -338,19 +355,29 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
-			executionMode = todoItems.length > 0;
+			executionMode = true;
 			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
 			pi.setActiveTools(restore);
 			normalModeTools = null;
 			updateStatus(ctx);
+			persistState();
 
-			const execMessage =
-				todoItems.length > 0
-					? `Execute the plan. Start with: ${todoItems[0].rawText ?? todoItems[0].text}`
-					: "Execute the plan you just created.";
+			// agent_end fires while the agent is still streaming, so this turn is
+			// delivered via the follow-up queue and run through agent.continue() —
+			// which does NOT re-fire before_agent_start. The execution context
+			// (remaining steps + the [DONE:n] instruction) must therefore be inlined
+			// here; before_agent_start only injects it on later user-initiated turns.
+			const remaining = todoItems.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const execMessage = `Execute the plan.
+
+Remaining steps:
+${remaining}
+
+Start with: ${todoItems[0].rawText ?? todoItems[0].text}
+After completing a step, include a [DONE:n] tag in your response.`;
 			pi.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
-				{ triggerTurn: true },
+				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
@@ -468,7 +495,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			// Snapshot current tools before restricting, so we can restore them
 			// exactly when plan mode is disabled (preserves Hindsight tools, etc.).
 			normalModeTools = pi.getActiveTools();
-			pi.setActiveTools(PLAN_MODE_TOOLS);
+			pi.setActiveTools(getPlanModeTools(normalModeTools));
 		}
 		updateStatus(ctx);
 	});
