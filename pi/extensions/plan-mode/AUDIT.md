@@ -68,6 +68,10 @@ A `session_compact` listener (added right before the `session_start` handler in
    authoritative for the live session and is untouched by compaction; this only
    protects the resume path. `markCompletedSteps` is additive, so a later
    re-scan can only confirm, never clear, the restored completion.
+   - **Also re-emits a silent `plan-mode-execute` marker while executing**
+     (`pi.appendEntry("plan-mode-execute", { reanchored: true })`). See the
+     "verified non-issue" note below for why this is defensive hardening rather
+     than a bug fix.
 2. **Reason-aware TUI notification.** Uses the v0.79.10 event fields `reason`
    (`"manual"`|`"threshold"`|`"overflow"`) and `willRetry` to label the toast:
    manual `/compact`, auto-compaction (threshold), `overflow recovery — retrying`
@@ -101,6 +105,40 @@ redundant/unreliable slop:
 If a future session re-asks "should plan-mode re-inject after overflow?", the
 answer is **no** — re-confirm only if pi changes the retry to go through
 `before_agent_start` or adds a continuation-injection delivery mode.
+
+**Verified non-issue + defensive hardening: the `executeIndex === -1` resume
+fallback (raised by Copilot on PR #37).** `session_start` bounds its `[DONE:n]`
+re-scan to entries *after* the last `plan-mode-execute` marker, to avoid picking
+up DONE tags from a previous plan. Copilot noted that if compaction summarizes
+that marker away, `executeIndex` falls back to `-1` (scan from the start), which
+*could* in principle mark steps completed from stale tags — and that
+`persistState()` alone does not re-establish the marker boundary.
+
+Traced against the actual `session_start` logic, this **does not produce a real
+bug**, for two independent reasons:
+1. **Chronological ordering forbids the dangerous case.** For a stale older-plan
+   `[DONE:n]` to corrupt current state, the older tag would have to survive
+   compaction while the *newer* `plan-mode-execute` marker is summarized away.
+   Compaction keeps a recent suffix (everything after `firstKeptEntryId`) and
+   summarizes the prefix. The marker is always chronologically newer than any
+   older-plan DONE tags, so if the marker lands in the summarized prefix, every
+   strictly-older DONE tag is in that prefix too. You cannot lose the marker
+   while retaining strictly-older tags.
+2. **The summary is never scanned.** The re-scan loop only collects
+   `entry.type === "message" && isAssistantMessage(...)`. The compaction summary
+   is a `compaction`-type entry, so even if it contained literal `[DONE:n]`
+   text it is skipped. The `-1` fallback therefore only ever scans kept,
+   post-boundary, current-plan messages — which `markCompletedSteps` (additive)
+   applies harmlessly on top of the already-restored completion state.
+
+Even so, the `session_compact` listener now **re-emits the `plan-mode-execute`
+marker** while executing (option C on PR #37). This is belt-and-suspenders: it
+re-establishes the scan boundary explicitly past the compaction point so resume
+correctness no longer depends on the chronological-ordering invariant above.
+The re-emitted marker is a silent `custom` entry (not the displayed
+`custom_message` banner); `session_start` detects it via `customType` alone, and
+any current-plan DONE tags before it are already captured in the persisted
+`plan-mode` entry's `completed` flags, so the tighter scan window loses nothing.
 
 ## Known limitation (unchanged)
 This is a **regex guardrail, not a sandbox.** A determined model can still

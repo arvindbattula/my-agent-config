@@ -373,6 +373,15 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	// todos and completion correctly. markCompletedSteps is additive, so a later
 	// re-scan can only confirm — never clear — the restored completion.
 	//
+	// While executing we also re-emit a silent plan-mode-execute marker. The
+	// resume re-scan bounds [DONE:n] scanning to entries after the last such
+	// marker; if compaction summarizes the original marker away, executeIndex
+	// falls back to -1 (scan from the start). That fallback is provably safe here
+	// (chronological ordering means a lost marker implies all strictly-older DONE
+	// tags are summarized too, and the summary entry is not an assistant message
+	// so it is never scanned — see AUDIT.md), but re-anchoring the marker removes
+	// the dependency on that invariant: the scan window stays explicitly bounded.
+	//
 	// We deliberately do NOT re-inject remaining steps for the overflow/willRetry
 	// path. The retry runs via agent.continue(), which does not re-fire
 	// before_agent_start, and extension messages (nextTurn is consumed only in
@@ -386,6 +395,10 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		if (!planModeEnabled && !executing) return;
 
 		persistState();
+		if (executing) {
+			// Re-establish the [DONE:n] scan boundary past the compaction point.
+			pi.appendEntry("plan-mode-execute", { reanchored: true });
+		}
 
 		if (!ctx.hasUI) return;
 		const label =
