@@ -482,9 +482,13 @@ export default async function (pi: any) {
           retryCfg,
         );
         if (!fetchResult.ok) {
-          output.stopReason = "error";
+          // Same abort/error split as azure-openai-models so a future addition
+          // of signal-passing to the fetch above doesn't surface cancellations
+          // as misleading provider errors. Today the Anthropic extension does not
+          // forward options.signal, so `aborted` is always false here.
+          output.stopReason = fetchResult.aborted ? "aborted" : "error";
           output.errorMessage = fetchResult.errorMessage;
-          yield { type: "error", reason: "error", error: output };
+          yield { type: "error", reason: output.stopReason, error: output };
           return;
         }
         const response = fetchResult.response;

@@ -28,11 +28,17 @@ globalThis.fetch = async () => {
   throw new Error("network disabled in test");
 };
 
-// Required env vars read at module load.
+// Required env vars read at module load. Both providers' module-level
+// requireEnv() calls run when the test imports them — a clean CI/dev shell
+// without any AZURE_FOUNDRY_* env vars would otherwise crash at import
+// before any check could run.
 process.env.AZURE_FOUNDRY_BASE_URL ??= "https://test.invalid/anthropic/v1";
 process.env.AZURE_FOUNDRY_ARM_SUBSCRIPTION ??= "00000000-0000-0000-0000-000000000000";
 process.env.AZURE_FOUNDRY_ARM_RESOURCE_GROUP ??= "test-rg";
 process.env.AZURE_FOUNDRY_ARM_ACCOUNT ??= "test-account";
+process.env.AZURE_FOUNDRY_OPENAI_BASE_URL ??= "https://test.invalid/openai/v1";
+process.env.AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID ??= "test-deepseek";
+process.env.AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID ??= "test-kimi";
 // Disable the in-extension retry loop so the network-disabled fetch fails fast.
 // Prod default is 3 retries with 2s exponential backoff (~14s); tests don't need it.
 // Force-overwrite (`=`, not `??=`) so a developer/CI env with these set doesn't make
@@ -182,6 +188,37 @@ for (const { label, streamSimple, maxEnv } of RETRY_PROVIDERS) {
     }
   });
 }
+
+// Guards against the AbortError detection regressing — user cancellations
+// must NOT be retried and must surface stopReason: "aborted" instead of "error".
+await check("azure-openai-models retry loop: AbortError exits immediately as aborted", async () => {
+  const prevMax = process.env.AZURE_FOUNDRY_OPENAI_MAX_RETRIES;
+  process.env.AZURE_FOUNDRY_OPENAI_MAX_RETRIES = "3";  // would be 4 attempts if abort were retried
+  fetchCalls = 0;
+  // Pre-aborted controller — fetch rejects with DOMException 'AbortError'.
+  const controller = new AbortController();
+  controller.abort();
+  globalThis.fetch = async (_url, opts) => {
+    fetchCalls++;
+    if (opts?.signal?.aborted) {
+      const err = new Error("The operation was aborted.");
+      err.name = "AbortError";
+      throw err;
+    }
+    return new Response("", { status: 200 });
+  };
+  try {
+    const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
+    const stream = await openaiStreamSimple(MODEL, CONTEXT, { signal: controller.signal });
+    for await (const _ of stream) { /* drain */ }
+    assert.equal(fetchCalls, 1, "abort must short-circuit retries (1 attempt, not 4)");
+    const msg = await stream.result();
+    assert.equal(msg.stopReason, "aborted", "abort surfaces as stopReason 'aborted', not 'error'");
+    assert.ok(msg.errorMessage, "errorMessage is still populated for context");
+  } finally {
+    process.env.AZURE_FOUNDRY_OPENAI_MAX_RETRIES = prevMax ?? "0";
+  }
+});
 
 // Guards against the readRetryConfig sanitization regressing — NaN/negative/empty
 // env values must fall back to defaults instead of producing an unrunnable loop.

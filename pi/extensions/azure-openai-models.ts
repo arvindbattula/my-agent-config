@@ -230,9 +230,12 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
         retryCfg,
       );
       if (!fetchResult.ok) {
-        output.stopReason = "error";
+        // Preserve pi-ai abort semantics: when the user cancels (AbortSignal),
+        // report stopReason "aborted" rather than "error". The outer catch block
+        // below uses the same convention for failures during streaming.
+        output.stopReason = fetchResult.aborted ? "aborted" : "error";
         output.errorMessage = fetchResult.errorMessage;
-        yield { type: "error", reason: "error", error: output };
+        yield { type: "error", reason: output.stopReason, error: output };
         return;
       }
       const response = fetchResult.response;

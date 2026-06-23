@@ -52,7 +52,10 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 export type FetchResult =
   | { ok: true; response: Response }
-  | { ok: false; errorMessage: string };
+  // `aborted: true` when the failure came from an AbortSignal cancellation
+  // (user pressed ESC / cancelled the turn). The caller should report this as
+  // stopReason: "aborted", not "error", to preserve pi-ai's standard semantics.
+  | { ok: false; aborted: boolean; errorMessage: string };
 
 /**
  * Run a fetch with transient-error retries. The caller passes a thunk that
@@ -70,13 +73,21 @@ export async function fetchWithTransientRetry(
     try {
       response = await doFetch();
     } catch (err: any) {
+      // User cancellation — do NOT retry. fetch() rejects with a DOMException
+      // named "AbortError" when the supplied AbortSignal fires. Retrying here
+      // would delay the cancel and surface as misleading provider errors.
+      // Surface immediately with aborted=true so the caller can set
+      // stopReason: "aborted" instead of "error".
+      if (err?.name === "AbortError") {
+        return { ok: false, aborted: true, errorMessage: err?.message ?? "aborted" };
+      }
       // Network-level failure — always treat as transient.
       lastErrorMessage = `fetch failed: ${err?.message ?? String(err)}`;
       if (attempt < cfg.maxRetries) {
         await sleep(cfg.baseDelayMs * 2 ** attempt);
         continue;
       }
-      return { ok: false, errorMessage: lastErrorMessage };
+      return { ok: false, aborted: false, errorMessage: lastErrorMessage };
     }
 
     if (response.ok) return { ok: true, response };
@@ -88,11 +99,11 @@ export async function fetchWithTransientRetry(
       await sleep(cfg.baseDelayMs * 2 ** attempt);
       continue;
     }
-    return { ok: false, errorMessage: lastErrorMessage };
+    return { ok: false, aborted: false, errorMessage: lastErrorMessage };
   }
 
   // Defensive: loop exited without yielding success or terminating (shouldn't happen
   // because maxRetries is non-negative; only reachable if maxRetries was negative
   // before sanitization removed that path).
-  return { ok: false, errorMessage: lastErrorMessage || "unknown error" };
+  return { ok: false, aborted: false, errorMessage: lastErrorMessage || "unknown error" };
 }
