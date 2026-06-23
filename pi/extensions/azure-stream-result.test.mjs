@@ -35,8 +35,12 @@ process.env.AZURE_FOUNDRY_ARM_RESOURCE_GROUP ??= "test-rg";
 process.env.AZURE_FOUNDRY_ARM_ACCOUNT ??= "test-account";
 // Disable the in-extension retry loop so the network-disabled fetch fails fast.
 // Prod default is 3 retries with 2s exponential backoff (~14s); tests don't need it.
-process.env.AZURE_FOUNDRY_MAX_RETRIES ??= "0";
-process.env.AZURE_FOUNDRY_RETRY_BASE_DELAY_MS ??= "0";
+// Force-overwrite (`=`, not `??=`) so a developer/CI env with these set doesn't make
+// the test slow/flaky.
+process.env.AZURE_FOUNDRY_MAX_RETRIES = "0";
+process.env.AZURE_FOUNDRY_RETRY_BASE_DELAY_MS = "0";
+process.env.AZURE_FOUNDRY_OPENAI_MAX_RETRIES = "0";
+process.env.AZURE_FOUNDRY_OPENAI_RETRY_BASE_DELAY_MS = "0";
 
 const CONTEXT = { systemPrompt: "test", messages: [{ role: "user", content: "hi" }], tools: [] };
 const MODEL = {
@@ -117,10 +121,75 @@ const stubTransientFetch = (status, body) => async () => {
   return new Response(body, { status, headers: { "content-type": "application/json" } });
 };
 
-await check("azure-foundry retry loop: 529 retried MAX_RETRIES+1 times, one error event", async () => {
-  // Allow 2 retries (3 total attempts) with zero delay so we can assert the count.
+// Run the same two retry-loop assertions against both providers — they share
+// `lib/transient-retry.ts` but each owns its own env var namespace and fetch URL.
+const RETRY_PROVIDERS = [
+  {
+    label: "azure-foundry",
+    streamSimple: foundryStreamSimple,
+    maxEnv: "AZURE_FOUNDRY_MAX_RETRIES",
+  },
+  {
+    label: "azure-openai-models",
+    streamSimple: await getStreamSimple("./azure-openai-models.ts"),
+    maxEnv: "AZURE_FOUNDRY_OPENAI_MAX_RETRIES",
+  },
+];
+
+for (const { label, streamSimple, maxEnv } of RETRY_PROVIDERS) {
+  await check(`${label} retry loop: 529 retried MAX_RETRIES+1 times, one error event`, async () => {
+    // Allow 2 retries (3 total attempts) with zero delay so we can assert the count.
+    const prevMax = process.env[maxEnv];
+    process.env[maxEnv] = "2";
+    fetchCalls = 0;
+    globalThis.fetch = stubTransientFetch(
+      529,
+      JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } }),
+    );
+    try {
+      const stream = await streamSimple(MODEL, CONTEXT, {});
+      let errorEvents = 0;
+      let startEvents = 0;
+      for await (const ev of stream) {
+        if (ev.type === "start") startEvents++;
+        if (ev.type === "error") errorEvents++;
+      }
+      assert.equal(startEvents, 1, "exactly one start event before any retries");
+      assert.equal(errorEvents, 1, "exactly one error event after retries exhaust");
+      assert.equal(fetchCalls, 3, "3 fetch attempts = initial + 2 retries");
+      const msg = await stream.result();
+      assert.equal(msg.stopReason, "error");
+      assert.match(msg.errorMessage, /^529 /, "errorMessage matches pi-ai canonical `${status} ${body}`");
+      assert.match(msg.errorMessage, /overloaded/i, "body keyword present for pi's retry matcher");
+    } finally {
+      process.env[maxEnv] = prevMax ?? "0";
+    }
+  });
+
+  await check(`${label} retry loop: non-transient 400 does NOT retry`, async () => {
+    const prevMax = process.env[maxEnv];
+    process.env[maxEnv] = "3";
+    fetchCalls = 0;
+    globalThis.fetch = stubTransientFetch(400, '{"error":"bad request"}');
+    try {
+      const stream = await streamSimple(MODEL, CONTEXT, {});
+      for await (const _ of stream) { /* drain */ }
+      assert.equal(fetchCalls, 1, "non-transient status must not retry");
+      const msg = await stream.result();
+      assert.match(msg.errorMessage, /^400 /);
+    } finally {
+      process.env[maxEnv] = prevMax ?? "0";
+    }
+  });
+}
+
+// Guards against the readRetryConfig sanitization regressing — NaN/negative/empty
+// env values must fall back to defaults instead of producing an unrunnable loop.
+await check("azure-foundry retry loop: invalid env (NaN) falls back to default, retries on 529", async () => {
   const prevMax = process.env.AZURE_FOUNDRY_MAX_RETRIES;
-  process.env.AZURE_FOUNDRY_MAX_RETRIES = "2";
+  const prevDelay = process.env.AZURE_FOUNDRY_RETRY_BASE_DELAY_MS;
+  process.env.AZURE_FOUNDRY_MAX_RETRIES = "not-a-number";
+  process.env.AZURE_FOUNDRY_RETRY_BASE_DELAY_MS = "0";  // keep test fast: still valid (>=0)
   fetchCalls = 0;
   globalThis.fetch = stubTransientFetch(
     529,
@@ -128,37 +197,13 @@ await check("azure-foundry retry loop: 529 retried MAX_RETRIES+1 times, one erro
   );
   try {
     const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
-    let errorEvents = 0;
-    let startEvents = 0;
-    for await (const ev of stream) {
-      if (ev.type === "start") startEvents++;
-      if (ev.type === "error") errorEvents++;
-    }
-    assert.equal(startEvents, 1, "exactly one start event before any retries");
-    assert.equal(errorEvents, 1, "exactly one error event after retries exhaust");
-    assert.equal(fetchCalls, 3, "3 fetch attempts = initial + 2 retries");
-    const msg = await stream.result();
-    assert.equal(msg.stopReason, "error");
-    assert.match(msg.errorMessage, /^529 /, "errorMessage matches pi-ai canonical `${status} ${body}`");
-    assert.match(msg.errorMessage, /overloaded/i, "body keyword present for pi's retry matcher");
-  } finally {
-    process.env.AZURE_FOUNDRY_MAX_RETRIES = prevMax ?? "0";
-  }
-});
-
-await check("azure-foundry retry loop: non-transient 400 does NOT retry", async () => {
-  const prevMax = process.env.AZURE_FOUNDRY_MAX_RETRIES;
-  process.env.AZURE_FOUNDRY_MAX_RETRIES = "3";
-  fetchCalls = 0;
-  globalThis.fetch = stubTransientFetch(400, '{"error":"bad request"}');
-  try {
-    const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
     for await (const _ of stream) { /* drain */ }
-    assert.equal(fetchCalls, 1, "non-transient status must not retry");
-    const msg = await stream.result();
-    assert.match(msg.errorMessage, /^400 /);
+    // Default maxRetries=3 -> 4 total attempts. Critically NOT zero (which is
+    // what `Number("not-a-number")` -> NaN -> falsy attempt loop would have given).
+    assert.equal(fetchCalls, 4, "invalid env should fall back to default 3 retries (4 attempts)");
   } finally {
     process.env.AZURE_FOUNDRY_MAX_RETRIES = prevMax ?? "0";
+    process.env.AZURE_FOUNDRY_RETRY_BASE_DELAY_MS = prevDelay ?? "0";
   }
 });
 
