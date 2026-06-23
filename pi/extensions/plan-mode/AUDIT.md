@@ -54,6 +54,92 @@ command blocked back-to-back notifies only once (the model often retries). It
 resets on `/plan` toggle and whenever a command passes, so distinct attempts
 still notify. The model-facing `reason` is NOT deduped — only the TUI toast.
 
+### Compaction-aware state re-anchoring (`session_compact`, added 2026-06-22, pi v0.79.10)
+A `session_compact` listener (added right before the `session_start` handler in
+`index.ts`) does two things when plan mode or plan execution is active:
+
+1. **Re-persists plan state past the compaction boundary.** Calls the existing
+   `persistState()` so a fresh `plan-mode` entry (current `enabled`/`todos`/
+   `executing`, including per-step `completed` flags) is written *after* the
+   compaction point. Compaction can summarize away the older `plan-mode` entry,
+   the `plan-mode-execute` marker, and the `[DONE:n]`-tagged assistant messages
+   that `session_start` re-scans on resume — so without this, a resume *after* a
+   compaction could lose execution/completion state. In-memory `todoItems` is
+   authoritative for the live session and is untouched by compaction; this only
+   protects the resume path. `markCompletedSteps` is additive, so a later
+   re-scan can only confirm, never clear, the restored completion.
+   - **Also re-emits a silent `plan-mode-execute` marker while executing**
+     (`pi.appendEntry("plan-mode-execute", { reanchored: true })`). See the
+     "verified non-issue" note below for why this is defensive hardening rather
+     than a bug fix.
+2. **Reason-aware TUI notification.** Uses the v0.79.10 event fields `reason`
+   (`"manual"`|`"threshold"`|`"overflow"`) and `willRetry` to label the toast:
+   manual `/compact`, auto-compaction (threshold), `overflow recovery — retrying`
+   (overflow + willRetry), or plain `overflow`. Appends remaining-step count
+   during execution. Skipped when `!ctx.hasUI`.
+
+The `event` is inferred as `SessionCompactEvent` from the `on("session_compact")`
+overload (no import needed) — verified real via `tsc` (a bogus field access
+errors TS2339, so `reason`/`willRetry` are genuinely type-checked, not `any`).
+
+**Deliberately NOT done: re-injecting remaining steps for the overflow retry.**
+Verified against `dist/core/agent-session.js` (pi v0.79.10) that this would be
+redundant/unreliable slop:
+- The overflow retry is driven by `agent.continue()` in `_handlePostAgentRun`'s
+  while-loop (`_runAgentPrompt`, ~L663). `before_agent_start`
+  (`emitBeforeAgentStart`) is emitted **only** inside `agent.prompt()` (~L803),
+  never on the `continue()` retry — so it does **not** re-fire on the retried turn.
+- But an extension still cannot reach that retry's context: `deliverAs:"nextTurn"`
+  is consumed only in `prompt()` (`_pendingNextTurnMessages` read ~L798);
+  `deliverAs:"followUp"` lands *after* the run; and after overflow compaction
+  `agent.state.messages` is rebuilt purely from the compacted session (~L1581).
+- It is also largely unnecessary: the overflowing turn's own
+  `plan-execution-context` is the most-recent content and is normally kept past
+  `firstKeptEntryId`, and pi's summary template already captures Progress/Next
+  Steps, so the retry still sees the plan.
+- `session_before_compact`'s extension return contract is only `{ cancel }` or a
+  full `{ compaction: { summary, ... } }` replacement; its `customInstructions`
+  is an input (passed `undefined` by auto-compaction), so there is no cheap way
+  to feed steps into pi's own summarizer without replacing the whole summary.
+
+If a future session re-asks "should plan-mode re-inject after overflow?", the
+answer is **no** — re-confirm only if pi changes the retry to go through
+`before_agent_start` or adds a continuation-injection delivery mode.
+
+**Verified non-issue + defensive hardening: the `executeIndex === -1` resume
+fallback (raised by Copilot on PR #37).** `session_start` bounds its `[DONE:n]`
+re-scan to entries *after* the last `plan-mode-execute` marker, to avoid picking
+up DONE tags from a previous plan. Copilot noted that if compaction summarizes
+that marker away, `executeIndex` falls back to `-1` (scan from the start), which
+*could* in principle mark steps completed from stale tags — and that
+`persistState()` alone does not re-establish the marker boundary.
+
+Traced against the actual `session_start` logic, this **does not produce a real
+bug**, for two independent reasons:
+1. **Chronological ordering forbids the dangerous case.** For a stale older-plan
+   `[DONE:n]` to corrupt current state, the older tag would have to survive
+   compaction while the *newer* `plan-mode-execute` marker is summarized away.
+   Compaction keeps a recent suffix (everything after `firstKeptEntryId`) and
+   summarizes the prefix. The marker is always chronologically newer than any
+   older-plan DONE tags, so if the marker lands in the summarized prefix, every
+   strictly-older DONE tag is in that prefix too. You cannot lose the marker
+   while retaining strictly-older tags.
+2. **The summary is never scanned.** The re-scan loop only collects
+   `entry.type === "message" && isAssistantMessage(...)`. The compaction summary
+   is a `compaction`-type entry, so even if it contained literal `[DONE:n]`
+   text it is skipped. The `-1` fallback therefore only ever scans kept,
+   post-boundary, current-plan messages — which `markCompletedSteps` (additive)
+   applies harmlessly on top of the already-restored completion state.
+
+Even so, the `session_compact` listener now **re-emits the `plan-mode-execute`
+marker** while executing (option C on PR #37). This is belt-and-suspenders: it
+re-establishes the scan boundary explicitly past the compaction point so resume
+correctness no longer depends on the chronological-ordering invariant above.
+The re-emitted marker is a silent `custom` entry (not the displayed
+`custom_message` banner); `session_start` detects it via `customType` alone, and
+any current-plan DONE tags before it are already captured in the persisted
+`plan-mode` entry's `completed` flags, so the tighter scan window loses nothing.
+
 ## Known limitation (unchanged)
 This is a **regex guardrail, not a sandbox.** A determined model can still
 construct evasions (e.g. obfuscated string concatenation inside an allowed
@@ -90,6 +176,10 @@ todo list (above the editor) is separate and unaffected.
   (the footer-data-provider API or statusline.ts could drift)
 - Re-test `/plan` (extension API can drift: events like
   `before_agent_start`, `setActiveTools`, `context`).
+- Re-verify the `session_compact` listener after each `pi update`: confirm
+  `SessionCompactEvent` still carries `reason`/`willRetry`, and re-check the
+  overflow-retry assumptions above if `agent-session.js` compaction/retry flow
+  changed (i.e. whether `before_agent_start` now re-fires on the retry).
 - If the upstream example gains real fixes, merge them in manually, keeping the
   divergences above.
 
