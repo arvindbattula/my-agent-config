@@ -189,6 +189,74 @@ for (const { label, streamSimple, maxEnv } of RETRY_PROVIDERS) {
   });
 }
 
+// Guards against the abortable-backoff path regressing — a user cancel
+// DURING the exponential-backoff sleep between retries must wake the sleep
+// early instead of waiting out the full delay. Without abort-aware sleep,
+// a cancel during an 8s backoff would feel completely unresponsive.
+await check("azure-openai-models retry loop: abort during backoff wakes sleep early", async () => {
+  const prevMax = process.env.AZURE_FOUNDRY_OPENAI_MAX_RETRIES;
+  const prevDelay = process.env.AZURE_FOUNDRY_OPENAI_RETRY_BASE_DELAY_MS;
+  process.env.AZURE_FOUNDRY_OPENAI_MAX_RETRIES = "3";
+  process.env.AZURE_FOUNDRY_OPENAI_RETRY_BASE_DELAY_MS = "2000";  // first backoff = 2s; abort at 50ms
+  fetchCalls = 0;
+  const controller = new AbortController();
+  globalThis.fetch = async (_url, opts) => {
+    fetchCalls++;
+    if (opts?.signal?.aborted) {
+      const err = new Error("The operation was aborted.");
+      err.name = "AbortError";
+      throw err;
+    }
+    // First call: return 529 to force entry into the backoff sleep.
+    return new Response(
+      JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } }),
+      { status: 529 },
+    );
+  };
+  // Fire the abort 50ms in — well inside the 2000ms first-backoff window.
+  setTimeout(() => controller.abort(), 50);
+  try {
+    const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
+    const t0 = Date.now();
+    const stream = await openaiStreamSimple(MODEL, CONTEXT, { signal: controller.signal });
+    for await (const _ of stream) { /* drain */ }
+    const elapsed = Date.now() - t0;
+    const msg = await stream.result();
+    assert.ok(
+      elapsed < 500,
+      `aborted backoff sleep should wake within ~50ms, was ${elapsed}ms (full 2000ms means abort wasn't threaded)`,
+    );
+    assert.equal(msg.stopReason, "aborted", "abort during backoff surfaces as 'aborted', not 'error'");
+    assert.equal(fetchCalls, 1, "must NOT issue a second fetch after abort during sleep");
+  } finally {
+    process.env.AZURE_FOUNDRY_OPENAI_MAX_RETRIES = prevMax ?? "0";
+    process.env.AZURE_FOUNDRY_OPENAI_RETRY_BASE_DELAY_MS = prevDelay ?? "0";
+  }
+});
+
+// Guards against fractional maxRetries silently adding an attempt at the
+// boundary. "2.5" must be floored to 2 -> 3 total attempts, not 4.
+await check("readRetryConfig: fractional maxRetries is floored to integer", async () => {
+  const prevMax = process.env.AZURE_FOUNDRY_MAX_RETRIES;
+  process.env.AZURE_FOUNDRY_MAX_RETRIES = "2.5";
+  fetchCalls = 0;
+  globalThis.fetch = stubTransientFetch(
+    529,
+    JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } }),
+  );
+  try {
+    const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
+    for await (const _ of stream) { /* drain */ }
+    assert.equal(
+      fetchCalls,
+      3,
+      "fractional 2.5 -> floor(2.5)=2 retries -> 3 attempts; unfloored would give 4 with attempt<=2.5",
+    );
+  } finally {
+    process.env.AZURE_FOUNDRY_MAX_RETRIES = prevMax ?? "0";
+  }
+});
+
 // Guards against the AbortError detection regressing — user cancellations
 // must NOT be retried and must surface stopReason: "aborted" instead of "error".
 await check("azure-openai-models retry loop: AbortError exits immediately as aborted", async () => {
@@ -211,7 +279,10 @@ await check("azure-openai-models retry loop: AbortError exits immediately as abo
     const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
     const stream = await openaiStreamSimple(MODEL, CONTEXT, { signal: controller.signal });
     for await (const _ of stream) { /* drain */ }
-    assert.equal(fetchCalls, 1, "abort must short-circuit retries (1 attempt, not 4)");
+    // 0 when the helper detects the pre-aborted signal before calling doFetch
+    // (current behavior), or 1 if it lets the first fetch throw AbortError.
+    // Either way is correct: the contract is "don't retry on abort" (i.e. <=1).
+    assert.ok(fetchCalls <= 1, `abort must short-circuit retries (got ${fetchCalls} attempts, want <=1)`);
     const msg = await stream.result();
     assert.equal(msg.stopReason, "aborted", "abort surfaces as stopReason 'aborted', not 'error'");
     assert.ok(msg.errorMessage, "errorMessage is still populated for context");

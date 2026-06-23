@@ -43,12 +43,35 @@ function sanitizeNum(raw: string | undefined, fallback: number): number {
  */
 export function readRetryConfig(maxEnv: string, baseEnv: string): RetryConfig {
   return {
-    maxRetries: sanitizeNum(process.env[maxEnv], DEFAULT_MAX_RETRIES),
+    // Floor maxRetries to an integer so fractional env values (e.g. "2.5")
+    // don't quietly add an extra attempt at the boundary. baseDelayMs stays
+    // fractional — setTimeout accepts any non-negative number.
+    maxRetries: Math.floor(sanitizeNum(process.env[maxEnv], DEFAULT_MAX_RETRIES)),
     baseDelayMs: sanitizeNum(process.env[baseEnv], DEFAULT_BASE_DELAY_MS),
   };
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/**
+ * Abort-aware sleep. Resolves either when `ms` elapses or when `signal` fires,
+ * whichever comes first. If `signal` is already aborted, resolves on next tick.
+ * Callers must check `signal?.aborted` after this returns to decide whether to
+ * proceed — the function itself doesn't throw, so the surrounding loop can
+ * exit cleanly with an `aborted: true` result.
+ */
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 export type FetchResult =
   | { ok: true; response: Response }
@@ -66,7 +89,18 @@ export type FetchResult =
 export async function fetchWithTransientRetry(
   doFetch: () => Promise<Response>,
   cfg: RetryConfig,
+  signal?: AbortSignal,
 ): Promise<FetchResult> {
+  // Helper: when an abort fires during backoff (or before the first attempt),
+  // exit with the same shape we use for fetch-time AbortError so callers have
+  // one branch to handle.
+  const abortedResult = (msg = "aborted"): FetchResult =>
+    ({ ok: false, aborted: true, errorMessage: msg });
+
+  // Pre-aborted controller: skip the work entirely. Caller will surface this
+  // as stopReason: "aborted" identically to a mid-flight cancellation.
+  if (signal?.aborted) return abortedResult();
+
   let lastErrorMessage = "";
   for (let attempt = 0; attempt <= cfg.maxRetries; attempt++) {
     let response: Response;
@@ -76,15 +110,14 @@ export async function fetchWithTransientRetry(
       // User cancellation — do NOT retry. fetch() rejects with a DOMException
       // named "AbortError" when the supplied AbortSignal fires. Retrying here
       // would delay the cancel and surface as misleading provider errors.
-      // Surface immediately with aborted=true so the caller can set
-      // stopReason: "aborted" instead of "error".
       if (err?.name === "AbortError") {
-        return { ok: false, aborted: true, errorMessage: err?.message ?? "aborted" };
+        return abortedResult(err?.message ?? "aborted");
       }
       // Network-level failure — always treat as transient.
       lastErrorMessage = `fetch failed: ${err?.message ?? String(err)}`;
       if (attempt < cfg.maxRetries) {
-        await sleep(cfg.baseDelayMs * 2 ** attempt);
+        await abortableSleep(cfg.baseDelayMs * 2 ** attempt, signal);
+        if (signal?.aborted) return abortedResult();
         continue;
       }
       return { ok: false, aborted: false, errorMessage: lastErrorMessage };
@@ -96,7 +129,10 @@ export async function fetchWithTransientRetry(
     const errText = await response.text();
     lastErrorMessage = `${response.status} ${errText}`;
     if (TRANSIENT_HTTP_STATUS.has(response.status) && attempt < cfg.maxRetries) {
-      await sleep(cfg.baseDelayMs * 2 ** attempt);
+      // Use abort-aware sleep so a user cancel during the (potentially 8s)
+      // backoff window wakes immediately instead of waiting out the full delay.
+      await abortableSleep(cfg.baseDelayMs * 2 ** attempt, signal);
+      if (signal?.aborted) return abortedResult();
       continue;
     }
     return { ok: false, aborted: false, errorMessage: lastErrorMessage };

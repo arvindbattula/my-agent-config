@@ -228,6 +228,10 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
             signal: options?.signal,
           }),
         retryCfg,
+        // Threading signal into the helper makes the backoff sleep abort-aware,
+        // so a user cancel during the (up to 8s) wait wakes immediately instead
+        // of stalling the next attempt.
+        options?.signal,
       );
       if (!fetchResult.ok) {
         // Preserve pi-ai abort semantics: when the user cancels (AbortSignal),
