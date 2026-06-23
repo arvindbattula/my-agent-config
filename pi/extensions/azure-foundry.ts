@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { getAzureToken } from "./lib/azure-token";
+import { fetchWithTransientRetry, readRetryConfig } from "./lib/transient-retry";
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -448,36 +449,49 @@ export default async function (pi: any) {
           }
         }
 
-        let response: Response;
-        try {
-          const token = getInferenceToken();
-          response = await fetch(`${BASE_URL}/messages`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${token}`,
-              "anthropic-version": ANTHROPIC_VERSION,
-              // Required to replay thinking blocks across tool-use turns.
-              "anthropic-beta": "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
-            },
-            body: JSON.stringify(body),
-          });
-        } catch (err: any) {
-          output.stopReason = "error";
-          output.errorMessage = `Network error: ${err.message}`;
-          yield { type: "error", reason: "error", error: output };
-          return;
-        }
-
-        if (!response.ok) {
-          const errText = await response.text();
-          output.stopReason = "error";
-          output.errorMessage = `HTTP ${response.status}: ${errText}`;
-          yield { type: "error", reason: "error", error: output };
-          return;
-        }
-
+        // Push `start` before any fetch so pi's UI/session always has a message anchor
+        // for this turn, even if the request fails before any SSE event arrives. The
+        // reference Anthropic provider gets this for free because the SDK only throws
+        // after start is pushed; with a manual fetch we have to do it explicitly.
         yield { type: "start", partial: output };
+
+        // In-extension retry on transient errors keeps each failed attempt out of
+        // pi's chat UI (pi prints one "Error: ..." line per assistant turn). Pair
+        // with `retry.enabled: false` in settings.json so pi's outer auto-retry
+        // doesn't stack on top. Env knobs let tests skip the sleeps and let users
+        // tune Anthropic-side retries independently of the OpenAI extension.
+        const retryCfg = readRetryConfig(
+          "AZURE_FOUNDRY_MAX_RETRIES",
+          "AZURE_FOUNDRY_RETRY_BASE_DELAY_MS",
+        );
+        const fetchResult = await fetchWithTransientRetry(
+          () =>
+            fetch(`${BASE_URL}/messages`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                // Refresh the token on every attempt — long backoffs can outlive
+                // a cached token's expiry buffer.
+                "Authorization": `Bearer ${getInferenceToken()}`,
+                "anthropic-version": ANTHROPIC_VERSION,
+                // Required to replay thinking blocks across tool-use turns.
+                "anthropic-beta": "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
+              },
+              body: JSON.stringify(body),
+            }),
+          retryCfg,
+        );
+        if (!fetchResult.ok) {
+          // Same abort/error split as azure-openai-models so a future addition
+          // of signal-passing to the fetch above doesn't surface cancellations
+          // as misleading provider errors. Today the Anthropic extension does not
+          // forward options.signal, so `aborted` is always false here.
+          output.stopReason = fetchResult.aborted ? "aborted" : "error";
+          output.errorMessage = fetchResult.errorMessage;
+          yield { type: "error", reason: output.stopReason, error: output };
+          return;
+        }
+        const response = fetchResult.response;
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
@@ -500,6 +514,19 @@ export default async function (pi: any) {
             try { event = JSON.parse(data); } catch { continue; }
 
             switch (event.type) {
+
+              case "error": {
+                // Anthropic SSE error frame mid-stream (e.g. overloaded_error after a
+                // 200 was already sent, or rate-limit during streaming). Use the same
+                // raw JSON shape Anthropic returns in HTTP error bodies so pi's retry
+                // matcher and TUI pretty-printer behave identically across paths.
+                // (No status code is available mid-stream — the body alone is enough
+                //  for pi's keyword regex to catch "overloaded", "rate_limit", etc.)
+                output.stopReason = "error";
+                output.errorMessage = JSON.stringify(event);
+                yield { type: "error", reason: "error", error: output };
+                return;
+              }
 
               case "message_start":
                 if (event.message?.usage) {

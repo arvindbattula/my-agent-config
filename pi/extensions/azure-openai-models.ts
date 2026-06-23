@@ -11,6 +11,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAzureToken } from "./lib/azure-token";
+import { fetchWithTransientRetry, readRetryConfig } from "./lib/transient-retry";
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -199,34 +200,49 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       }
       if (tools.length > 0) body.tools = tools;
 
-      let response: Response;
-      try {
-        const token = getAccessToken();
-        response = await fetch(`${BASE_URL}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`,
-          },
-          body: JSON.stringify(body),
-          signal: options?.signal,
-        });
-      } catch (err: any) {
-        output.stopReason = "error";
-        output.errorMessage = `Network error: ${err.message}`;
-        yield { type: "error", reason: "error", error: output };
-        return;
-      }
-
-      if (!response.ok) {
-        const errText = await response.text();
-        output.stopReason = "error";
-        output.errorMessage = `HTTP ${response.status}: ${errText}`;
-        yield { type: "error", reason: "error", error: output };
-        return;
-      }
-
+      // Push `start` before any fetch so pi's UI/session always has a message
+      // anchor for this turn, even if the request fails before any SSE event
+      // arrives. Pi's TUI keys the assistant message lifecycle off `start`;
+      // without it, an early error event has no message to attach to.
       yield { type: "start", partial: output };
+
+      // In-extension retry on transient errors (429, 5xx, fetch failures) keeps
+      // each failed attempt out of pi's chat UI. Pair with `retry.enabled: false`
+      // in settings.json so pi's outer auto-retry doesn't stack on top. Env knobs
+      // are independent of the Anthropic extension's so OpenAI-compat deployments
+      // can be tuned separately.
+      const retryCfg = readRetryConfig(
+        "AZURE_FOUNDRY_OPENAI_MAX_RETRIES",
+        "AZURE_FOUNDRY_OPENAI_RETRY_BASE_DELAY_MS",
+      );
+      const fetchResult = await fetchWithTransientRetry(
+        () =>
+          fetch(`${BASE_URL}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              // Refresh token on every attempt; long backoffs can outlive the cache buffer.
+              "Authorization": `Bearer ${getAccessToken()}`,
+            },
+            body: JSON.stringify(body),
+            signal: options?.signal,
+          }),
+        retryCfg,
+        // Threading signal into the helper makes the backoff sleep abort-aware,
+        // so a user cancel during the (up to 8s) wait wakes immediately instead
+        // of stalling the next attempt.
+        options?.signal,
+      );
+      if (!fetchResult.ok) {
+        // Preserve pi-ai abort semantics: when the user cancels (AbortSignal),
+        // report stopReason "aborted" rather than "error". The outer catch block
+        // below uses the same convention for failures during streaming.
+        output.stopReason = fetchResult.aborted ? "aborted" : "error";
+        output.errorMessage = fetchResult.errorMessage;
+        yield { type: "error", reason: output.stopReason, error: output };
+        return;
+      }
+      const response = fetchResult.response;
 
       // Block tracking
       let textBlock: any = null;
