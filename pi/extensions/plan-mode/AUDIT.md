@@ -278,6 +278,71 @@ message ends in a question) — lower friction, slightly heuristic.
    of a hardcoded list. Scoped to `finalizePlan` only; the other two call sites
    keep the hardcoded fallback because there the live tools are `PLAN_MODE_TOOLS`.
 
+### Merged upstream #5940 fixes + tool-preservation reversal (2026-06-23, pi v0.79.10)
+
+The v0.79.10 release fixed the upstream plan-mode **example** (#5940): preserve
+active custom tools, skip the action prompt when no plan is found, and queue
+refinement/execution follow-ups correctly from `agent_end`. This snapshot was
+forked before those landed; the three fixes are now merged in, keeping all
+divergences above.
+
+**1. Hindsight (and other injected) tools now stay active DURING plan mode.**
+Reverses the earlier design where `pi.setActiveTools(PLAN_MODE_TOOLS)` replaced
+the whole set with a hardcoded 6-tool list — which dropped injected tools (e.g.
+Hindsight) for the duration of plan mode and only restored them on exit (the
+restore was correct via the `normalModeTools` snapshot from item #5 above; the
+problem was plan mode itself was tool-starved). Now a `getPlanModeTools(active)`
+helper computes `active − {edit, write} ∪ PLAN_MODE_TOOLS`, so memory tools are
+available while planning. Used in both `togglePlanMode` and `session_start`.
+Matches upstream's `PLAN_MODE_DISABLED_TOOLS` approach.
+
+  **TRADEOFF / open assumption (flagged):** this enables ALL active Hindsight
+  tools in plan mode, including *write* ones (`hindsight_retain`,
+  `hindsight_delete_*`, etc.), not just read-only recall/reflect. If Hindsight is
+  configured against a *remote* server, that is a network/mutation path that the
+  bash allowlist (which only guards shell commands) does NOT cover — so plan
+  mode is no longer strictly "local read-only" for memory. Accepted per explicit
+  request ("we need hindsight memory tools during plan mode"). If a defensible
+  no-egress posture is later needed on a sensitive deal repo, restrict plan mode
+  to read-only Hindsight tools by name (recall/list/get/reflect) or use
+  `--plan-airgap` (deferred item A) — do NOT silently re-broaden.
+
+  The `before_agent_start` plan-mode prompt wording was updated to match: "other
+  active tools remain available (… memory tools)" instead of the old "you can
+  only use: read, bash, …".
+
+**2. Skip the "what next?" prompt when no plan was extracted.** `agent_end` now
+`return`s early when `todoItems.length === 0` (model asked a clarifying question
+or only explored), instead of showing an empty-choice select with a dead
+"Execute the plan" option. The now-constant `todoItems.length > 0` ternaries
+were simplified out.
+
+**3. Execute follow-up queued via `deliverAs:"followUp"` + execution context
+inlined in the execute message.** Two linked changes, both grounded in a core
+trace (pi-agent-core `dist/agent.js`, v0.79.10):
+  - `runWithLifecycle` sets `isStreaming = true`, runs the whole loop INCLUDING
+    emitting `agent_end` and awaiting its listeners, and only sets
+    `isStreaming = false` in `finishRun()` afterward. **So during the `agent_end`
+    handler the agent is still streaming.** A `sendMessage(..., {triggerTurn})`
+    there is therefore queued (not run immediately) and drained by
+    `_handlePostAgentRun` → `agent.continue()` → `runPromptMessages(...)`, which
+    does NOT call `session.prompt()` and so does NOT re-fire
+    `before_agent_start`.
+  - Because `before_agent_start` does not fire on that first execution turn, the
+    remaining-steps list and the `[DONE:n]` tagging instruction are now inlined
+    into the `plan-mode-execute` message (matching upstream). The old minimal
+    message ("Execute the plan. Start with: X") left the first turn with no
+    tagging instruction — a likely contributor to the lingering-widget pattern.
+  - Switched the send to `{ triggerTurn: true, deliverAs: "followUp" }` so it
+    queues as a follow-up (semantically "run after the agent would stop") rather
+    than steering. Added `persistState()` in the execute branch so `executing:
+    true` is durable immediately, not only after the first `turn_end`.
+  - The Refine path already used `sendUserMessage(refinement, { deliverAs:
+    "followUp" })` (without `deliverAs` it would throw while streaming), so it was
+    left unchanged.
+
+Verified: `tsc --noEmit --strict` clean against the installed v0.79.10 `.d.ts`.
+
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 
 These were considered and intentionally deferred to avoid speculative
