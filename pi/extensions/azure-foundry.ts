@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { getAzureToken } from "./lib/azure-token";
+import { fetchWithTransientRetry, readRetryConfig } from "./lib/transient-retry";
 
 function requireEnv(name: string): string {
   const val = process.env[name];
@@ -454,71 +455,39 @@ export default async function (pi: any) {
         // after start is pushed; with a manual fetch we have to do it explicitly.
         yield { type: "start", partial: output };
 
-        // Internal retry loop for transient backend errors (HTTP 529 Overloaded,
-        // 429 rate limit, 5xx, fetch failures). Doing this inside the extension
-        // keeps each attempt out of pi's chat UI — the TUI prints one "Error: ..."
-        // line per assistant turn, so only the final failure (or success) is
-        // surfaced. Pair this with `retry.enabled: false` in settings.json so
-        // pi's outer auto-retry doesn't stack on top.
-        // Overridable via env for tests / debugging. Defaults match pi's own retry shape.
-        const MAX_RETRIES = Number(process.env.AZURE_FOUNDRY_MAX_RETRIES ?? 3);          // attempts AFTER the initial try
-        const BASE_DELAY_MS = Number(process.env.AZURE_FOUNDRY_RETRY_BASE_DELAY_MS ?? 2000); // exponential: 2s, 4s, 8s
-        const TRANSIENT_HTTP = new Set([408, 425, 429, 500, 502, 503, 504, 529]);
-        const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-        let response!: Response;
-        let lastErrorMessage = "";
-        let succeeded = false;
-
-        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-          try {
-            const token = getInferenceToken();
-            response = await fetch(`${BASE_URL}/messages`, {
+        // In-extension retry on transient errors keeps each failed attempt out of
+        // pi's chat UI (pi prints one "Error: ..." line per assistant turn). Pair
+        // with `retry.enabled: false` in settings.json so pi's outer auto-retry
+        // doesn't stack on top. Env knobs let tests skip the sleeps and let users
+        // tune Anthropic-side retries independently of the OpenAI extension.
+        const retryCfg = readRetryConfig(
+          "AZURE_FOUNDRY_MAX_RETRIES",
+          "AZURE_FOUNDRY_RETRY_BASE_DELAY_MS",
+        );
+        const fetchResult = await fetchWithTransientRetry(
+          () =>
+            fetch(`${BASE_URL}/messages`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`,
+                // Refresh the token on every attempt — long backoffs can outlive
+                // a cached token's expiry buffer.
+                "Authorization": `Bearer ${getInferenceToken()}`,
                 "anthropic-version": ANTHROPIC_VERSION,
                 // Required to replay thinking blocks across tool-use turns.
                 "anthropic-beta": "fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
               },
               body: JSON.stringify(body),
-            });
-          } catch (err: any) {
-            // Network-level failure — always treat as transient.
-            lastErrorMessage = `fetch failed: ${err.message}`;
-            if (attempt < MAX_RETRIES) {
-              await sleep(BASE_DELAY_MS * 2 ** attempt);
-              continue;
-            }
-            output.stopReason = "error";
-            output.errorMessage = lastErrorMessage;
-            yield { type: "error", reason: "error", error: output };
-            return;
-          }
-
-          if (response.ok) { succeeded = true; break; }
-
-          // Non-2xx — retry only if the status is a known-transient code.
-          const errText = await response.text();
-          lastErrorMessage = `${response.status} ${errText}`;
-          if (TRANSIENT_HTTP.has(response.status) && attempt < MAX_RETRIES) {
-            await sleep(BASE_DELAY_MS * 2 ** attempt);
-            continue;
-          }
+            }),
+          retryCfg,
+        );
+        if (!fetchResult.ok) {
           output.stopReason = "error";
-          output.errorMessage = lastErrorMessage;
+          output.errorMessage = fetchResult.errorMessage;
           yield { type: "error", reason: "error", error: output };
           return;
         }
-
-        if (!succeeded) {
-          // Defensive: loop exited without yielding/success (shouldn't happen).
-          output.stopReason = "error";
-          output.errorMessage = lastErrorMessage || "unknown error";
-          yield { type: "error", reason: "error", error: output };
-          return;
-        }
+        const response = fetchResult.response;
 
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
@@ -544,11 +513,13 @@ export default async function (pi: any) {
 
               case "error": {
                 // Anthropic SSE error frame mid-stream (e.g. overloaded_error after a
-                // 200 was already sent, or rate-limit during streaming). Surface it as
-                // a pi error event with the canonical `${status?} ${body}` shape so the
-                // retry matcher picks up keywords like "overloaded" / "rate_limit".
+                // 200 was already sent, or rate-limit during streaming). Use the same
+                // raw JSON shape Anthropic returns in HTTP error bodies so pi's retry
+                // matcher and TUI pretty-printer behave identically across paths.
+                // (No status code is available mid-stream — the body alone is enough
+                //  for pi's keyword regex to catch "overloaded", "rate_limit", etc.)
                 output.stopReason = "error";
-                output.errorMessage = `${event.error?.type ?? "stream_error"}: ${event.error?.message ?? JSON.stringify(event)}`;
+                output.errorMessage = JSON.stringify(event);
                 yield { type: "error", reason: "error", error: output };
                 return;
               }
