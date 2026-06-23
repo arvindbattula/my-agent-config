@@ -364,6 +364,46 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		}
 	});
 
+	// Re-anchor plan state across a compaction boundary. Compaction can summarize
+	// away the older plan-mode entry, the plan-mode-execute marker, and the
+	// [DONE:n]-tagged assistant messages that session_start re-scans on resume.
+	// In-memory state (todoItems + completion) is authoritative for the live session
+	// and survives compaction untouched, so re-persisting here writes a fresh
+	// plan-mode entry AFTER the boundary; resume-after-compaction then reconstructs
+	// todos and completion correctly. markCompletedSteps is additive, so a later
+	// re-scan can only confirm — never clear — the restored completion.
+	//
+	// We deliberately do NOT re-inject remaining steps for the overflow/willRetry
+	// path. The retry runs via agent.continue(), which does not re-fire
+	// before_agent_start, and extension messages (nextTurn is consumed only in
+	// prompt(); followUp lands after the run) cannot reach that continuation's
+	// context — verified against pi v0.79.10 agent-session.js (see AUDIT.md). The
+	// overflowing turn's own plan-execution-context is the most-recent content and
+	// is normally kept past firstKeptEntryId, and pi's summary captures
+	// progress/next-steps, so the retry still sees the plan.
+	pi.on("session_compact", async (event, ctx) => {
+		const executing = executionMode && todoItems.length > 0;
+		if (!planModeEnabled && !executing) return;
+
+		persistState();
+
+		if (!ctx.hasUI) return;
+		const label =
+			event.reason === "manual"
+				? "manual /compact"
+				: event.reason === "overflow"
+					? event.willRetry
+						? "overflow recovery — retrying"
+						: "overflow"
+					: "auto-compaction";
+		if (executing) {
+			const remaining = todoItems.filter((t) => !t.completed).length;
+			ctx.ui.notify(`Context compacted (${label}) — ${remaining} plan step(s) remaining.`, "info");
+		} else {
+			ctx.ui.notify(`Context compacted (${label}) — still in plan mode.`, "info");
+		}
+	});
+
 	// Restore state on session start/resume
 	pi.on("session_start", async (event, ctx) => {
 		// Apply --plan flag only on initial startup; on resume/fork/new the
