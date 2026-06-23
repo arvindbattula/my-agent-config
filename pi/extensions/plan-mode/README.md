@@ -38,7 +38,8 @@ Plan:
 
 ### Plan Mode (Read-Only)
 - Built-in `edit`/`write` disabled; other active tools (read, bash, grep, find, ls, questionnaire, memory tools) remain available
-- Bash commands filtered through allowlist (local read-only; no network egress)
+- Bash commands filtered through allowlist (local read-only shell; no network via bash)
+- Other preserved tools keep their own capabilities — the no-egress guarantee is scoped to bash, not all of plan mode (e.g. a remote-backed memory tool can still do network I/O)
 - Agent creates a plan without making changes
 
 ### Execution Mode

@@ -34,8 +34,10 @@ function writePlanToFile(planText: string): string {
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 // Built-in tools disabled in plan mode. Everything else that is currently active
 // (e.g. Hindsight memory tools) stays available so the agent can recall/retain
-// context while planning. Read-only safety for the filesystem/network is enforced
-// by the bash allowlist (utils.ts), not by stripping every non-write tool.
+// context while planning. NOTE: the bash allowlist (utils.ts) only constrains
+// SHELL commands to local read-only; it does not sandbox the preserved tools.
+// Injected tools keep their own capabilities and may perform network/side-
+// effecting I/O. Plan mode disables built-in edit/write — not all egress.
 const PLAN_MODE_DISABLED_TOOLS = new Set<string>(["edit", "write"]);
 
 // Plan-mode tool set = the current active tools minus the disabled built-ins,
@@ -233,7 +235,8 @@ You are in plan mode - a read-only exploration mode for safe code analysis.
 Restrictions:
 - Built-in edit and write tools are disabled (no file modifications)
 - Other active tools remain available (read, bash, grep, find, ls, questionnaire, memory tools)
-- Bash is restricted to an allowlist of read-only, local commands (no network egress)
+- Bash is restricted to an allowlist of read-only, local shell commands (no network via the shell)
+- Other active tools keep their normal capabilities (memory tools may read/write their own store)
 
 Ask clarifying questions using the questionnaire tool.
 
