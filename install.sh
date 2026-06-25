@@ -1,6 +1,11 @@
 #!/bin/bash
 set -uo pipefail
 
+# Compatibility: Git Bash (Windows) has sha256sum; macOS has shasum -a 256
+if ! command -v sha256sum &>/dev/null && command -v shasum &>/dev/null; then
+    sha256sum() { shasum -a 256 "$@"; }
+fi
+
 # Resolve repo directory from script location
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
@@ -60,8 +65,8 @@ compare_file() {
     local local_file="$2"
 
     if [ -f "$repo_file" ] && [ -f "$local_file" ]; then
-        repo_hash=$(shasum -a 256 "$repo_file" | cut -d' ' -f1)
-        local_hash=$(shasum -a 256 "$local_file" | cut -d' ' -f1)
+        repo_hash=$(sha256sum "$repo_file" | cut -d' ' -f1)
+        local_hash=$(sha256sum "$local_file" | cut -d' ' -f1)
         if [ "$repo_hash" = "$local_hash" ]; then
             echo "identical"
         else
@@ -81,8 +86,8 @@ compare_dir() {
     local local_path="$2"
 
     if [ -d "$repo_path" ] && [ -d "$local_path" ]; then
-        repo_hash=$(cd "$repo_path" && find . -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
-        local_hash=$(cd "$local_path" && find . -type f | sort | xargs shasum -a 256 | shasum -a 256 | cut -d' ' -f1)
+        repo_hash=$(cd "$repo_path" && find . -type f | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)
+        local_hash=$(cd "$local_path" && find . -type f | sort | xargs sha256sum | sha256sum | cut -d' ' -f1)
         if [ "$repo_hash" = "$local_hash" ]; then
             echo "identical"
         else
