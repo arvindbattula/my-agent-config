@@ -15,6 +15,22 @@ description: Test-driven development with red-green-refactor loop. Use when user
 
 See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
 
+## When to Use (and When Not To)
+
+TDD is NOT universally beneficial. The `tdd-is-not-universal` rule gates on three conditions. If any condition fails, do not apply strict TDD.
+
+**Use TDD when:**
+- You have a known, stable spec to test against (written spec, API contract, acceptance criteria)
+- The code is long-lived (will be maintained/changed)
+- Core requirements are testable through public interfaces
+
+**Skip or defer TDD when:**
+- You're reverse-engineering, exploring unknown code, or discovering requirements as you go — self-written tests against incomplete understanding produce false confidence
+- The task is a trivial script or throwaway prototype
+- Core behavior resists unit testing (interactive CLIs, rendering, system calls) — use integration-level verification instead
+
+**The proved failure mode:** On black-box tasks where the spec is unknown, agents write tests for what they can observe, watch them pass, and confidently stop — shipping an incomplete product while spending 55% more. If you can't write tests that reliably detect an incomplete implementation, TDD is harmful.
+
 ## Anti-Pattern: Horizontal Slices
 
 **DO NOT write all tests first, then all implementation.** This is "horizontal slicing" - treating RED as "write all tests" and GREEN as "write all code."
@@ -98,7 +114,7 @@ GREEN: Minimal code to pass → passes
 Rules:
 
 - One test at a time
-- Only enough code to pass current test
+- Minimal code to pass — then verify no known requirement is untested. Passing tests ≠ complete product.
 - Don't anticipate future tests
 - Keep tests focused on observable behavior
 
@@ -134,6 +150,16 @@ After all tests pass, look for [refactor candidates](refactoring.md):
 - Bug fixes without reproduction tests
 - Skipping tests to make the suite pass
 - Mocking everything instead of testing real behavior
+- Tests pass but known requirements are untested
+- Behavior dropped because it "can't be unit tested" — use integration tests instead
+
+## When Unit Tests Won't Work
+
+Some behavior resists unit testing: interactive terminals, rendering output, os-level system calls, real-time behavior. When you encounter this:
+
+1. **Write an integration-level test** that exercises the real path end-to-end
+2. If even integration testing is impractical, **note it explicitly** with a manual verification checklist
+3. **Never drop behavior** because it's hard to test — that's shipping an incomplete product
 
 ## Checklist Per Cycle
 

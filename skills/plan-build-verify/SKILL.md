@@ -82,7 +82,7 @@ Persistence rule: durable project knowledge lives **only** in `docs/`. Never cre
 
 ## Core Principles
 
-- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
+- **Simplicity First**: Make every change as simple as possible. "Simple" means simplest correct solution, not fewest lines — delegating to a real library is often simpler than hand-rolling a subset.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
 
