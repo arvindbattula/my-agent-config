@@ -46,7 +46,7 @@ cd my-agent-config
 **Workflow — Structured AI-assisted engineering:**
 
 ```
-/idea-refine → /scaffold → /discover → /blueprint → /construct → /inspect → /ship → /retro
+/idea-refine → /scaffold → /discover → /blueprint → /construct → /inspect → /ship → /production-gate → /retro
                                                        ↑              |
                                                        └──────────────┘
                                                     (loop until done)
@@ -61,6 +61,7 @@ cd my-agent-config
 | `/construct` | Execute one phase at a time. Orientation step scopes changes. Resumes partial work. Live spec reconciliation when gaps found. Context window management. |
 | `/inspect` | Multi-pass review (architecture, spec compliance, edge cases, code quality, security). Severity labels, dependency review, change sizing guidance. |
 | `/ship` | Pre-launch checklist (code quality, security, performance, infrastructure, docs). Rollback plan template and post-deploy verification. |
+| `/production-gate` | Go/no-go gate to promote a vibe-coded prototype into a managed IT environment. Applicability triage, sectioned readiness checklist (owner + `[Claude High/Partial/None]` + blocker/waiver markers), waiver mechanism, sign-off table. |
 | `/decide` | Log architecture/product decisions in ADR format → `decisions.md` |
 | `/retro` | Project retrospective — extracts blind spots, positive patterns, and skill performance notes. Feeds back into all workflow skills. |
 
@@ -87,6 +88,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `verify-before-done` | Always verify work before declaring complete; frontend requires tests + lint + build |
 | `no-ai-slop` | No obvious comments, no unnecessary defensive checks, no aspirational comments describing unimplemented intent |
 | `simplicity-over-cleverness` | Simplest solution that works, no over-engineering |
+| `tdd-is-not-universal` | Gate strict test-first on spec stability, code longevity, and testable surface; build-first + verify-after when any gate fails |
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
 | `minimal-diff` | Only change what's necessary; exception: update broken call sites directly |
 | `sunk-cost-breaker` | Stop after 3+ failed attempts; propose fresh restart with lessons learned |

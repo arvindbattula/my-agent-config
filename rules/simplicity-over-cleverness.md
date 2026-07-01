@@ -1,1 +1,1 @@
-Prefer the simplest solution that works. Don't over-engineer, don't add abstractions for hypothetical future needs, don't refactor code you weren't asked to touch.
+Prefer the simplest solution that works. Don't over-engineer, don't add abstractions for hypothetical future needs, don't refactor code you weren't asked to touch. "Simplest" means simplest correct solution — not fewest lines of code. Delegating to a real library or existing tool is often simpler (and more correct) than hand-rolling a compact subset.

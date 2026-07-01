@@ -32,6 +32,7 @@ Characteristics:
 | Mocking everything | Tests pass, production breaks | Real implementations > fakes > stubs > mocks |
 | No test isolation | Pass individually, fail together | Each test manages its own state |
 | Testing framework code | Wastes time testing third-party behavior | Only test YOUR code |
+| **Compilation error as RED** | "Cannot find module" / "X is not a function" is NOT a valid TDD RED — the test assertion never executed, so you learned nothing about behavior | Create the file with a stub that returns the wrong value, run the test, see the assertion fail, THEN implement |
 
 ## Bad Tests
 
