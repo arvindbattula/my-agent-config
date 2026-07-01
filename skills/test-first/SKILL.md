@@ -29,7 +29,7 @@ TDD is NOT universally beneficial. The `tdd-is-not-universal` rule gates on thre
 - The task is a trivial script or throwaway prototype
 - Core behavior resists unit testing (interactive CLIs, rendering, system calls) — use integration-level verification instead
 
-**The proved failure mode:** On black-box tasks where the spec is unknown, agents write tests for what they can observe, watch them pass, and confidently stop — shipping an incomplete product while spending 55% more. If you can't write tests that reliably detect an incomplete implementation, TDD is harmful.
+**The proven failure mode:** On black-box tasks where the spec is unknown, agents write tests for what they can observe, watch them pass, and confidently stop — shipping an incomplete product while spending 55% more. If you can't write tests that reliably detect an incomplete implementation, TDD is harmful.
 
 ## Anti-Pattern: Horizontal Slices
 

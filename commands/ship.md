@@ -3,7 +3,7 @@ name: ship
 description: Pre-launch checklist and deployment verification
 ---
 
-Pre-launch checklist. Run before deploying to production or sharing with users. This is the final gate in the discover → blueprint → construct → inspect → ship pipeline.
+Pre-launch checklist. Run before deploying to production or sharing with users. This is the launch gate in the discover → blueprint → construct → inspect → ship pipeline. To promote a prototype into a managed IT environment (SSO, real data, compliance sign-offs), run `/production-gate` after this.
 
 ## Prerequisites
 
