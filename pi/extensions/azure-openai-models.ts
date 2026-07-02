@@ -275,6 +275,7 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
             output.usage.input = u.prompt_tokens ?? 0;
             output.usage.output = u.completion_tokens ?? 0;
             output.usage.cacheRead = u.prompt_tokens_details?.cached_tokens ?? 0;
+            output.usage.reasoning = u.completion_tokens_details?.reasoning_tokens || 0;
             output.usage.totalTokens = output.usage.input + output.usage.output;
             calculateCost(model, output.usage);
           }

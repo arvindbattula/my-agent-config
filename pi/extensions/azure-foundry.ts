@@ -608,10 +608,20 @@ export default async function (pi: any) {
               }
 
               case "message_delta":
-                if (event.usage?.output_tokens) {
+                if (event.usage?.output_tokens != null) {
                   output.usage.output = event.usage.output_tokens;
-                  output.usage.totalTokens = output.usage.input + output.usage.output;
                 }
+                // Anthropic reports reasoning tokens in output_tokens_details.thinking_tokens
+                // on the final message_delta usage (a subset of output_tokens).
+                {
+                  const thinkingTokens = (event.usage as any)
+                    ?.output_tokens_details?.thinking_tokens;
+                  if (thinkingTokens != null) {
+                    output.usage.reasoning = thinkingTokens;
+                  }
+                }
+                output.usage.totalTokens =
+                  output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
                 {
                   // Cost = tokens × per-token list rates (from model, or resolved by id).
                   const rate = rateForModel(model);
