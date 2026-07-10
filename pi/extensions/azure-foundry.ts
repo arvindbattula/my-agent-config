@@ -78,7 +78,7 @@ type Spec = {
 const MODEL_SPECS: Record<string, Spec> = {
   "claude-haiku-4-5":  { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: HAIKU_COST  },
   "claude-sonnet-4-5": { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: SONNET_COST },
-  "claude-sonnet-4-6": { contextWindow: 200000, maxTokens: 16384, reasoning: true,  cost: SONNET_COST, adaptive: true, xhighEffort: "xhigh" },
+  "claude-sonnet-4-6": { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: SONNET_COST, adaptive: true, xhighEffort: "xhigh" },
   "claude-opus-4-5":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
   "claude-opus-4-6":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
   "claude-opus-4-7":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
@@ -608,10 +608,20 @@ export default async function (pi: any) {
               }
 
               case "message_delta":
-                if (event.usage?.output_tokens) {
+                if (event.usage?.output_tokens != null) {
                   output.usage.output = event.usage.output_tokens;
-                  output.usage.totalTokens = output.usage.input + output.usage.output;
                 }
+                // Anthropic reports reasoning tokens in output_tokens_details.thinking_tokens
+                // on the final message_delta usage (a subset of output_tokens).
+                {
+                  const thinkingTokens = (event.usage as any)
+                    ?.output_tokens_details?.thinking_tokens;
+                  if (thinkingTokens != null) {
+                    output.usage.reasoning = thinkingTokens;
+                  }
+                }
+                output.usage.totalTokens =
+                  output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
                 {
                   // Cost = tokens × per-token list rates (from model, or resolved by id).
                   const rate = rateForModel(model);
