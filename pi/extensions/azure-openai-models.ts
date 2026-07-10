@@ -169,7 +169,7 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
     const output: any = {
       role: "assistant",
       content: [],
-      api: "openai-completions",
+      api: "azure-openai-custom",
       provider: "azure-openai-models",
       model: model.id,
       usage: {
@@ -399,7 +399,7 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
 
 export default function (pi: ExtensionAPI) {
   pi.registerProvider("azure-openai-models", {
-    api: "openai-completions",
+    api: "azure-openai-custom",
     baseUrl: BASE_URL,
     apiKey: "entra-id",
     models: MODELS,

@@ -78,7 +78,7 @@ type Spec = {
 const MODEL_SPECS: Record<string, Spec> = {
   "claude-haiku-4-5":  { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: HAIKU_COST  },
   "claude-sonnet-4-5": { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: SONNET_COST },
-  "claude-sonnet-4-6": { contextWindow: 200000, maxTokens: 16384, reasoning: true,  cost: SONNET_COST, adaptive: true, xhighEffort: "xhigh" },
+  "claude-sonnet-4-6": { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: SONNET_COST, adaptive: true, xhighEffort: "xhigh" },
   "claude-opus-4-5":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
   "claude-opus-4-6":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
   "claude-opus-4-7":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },

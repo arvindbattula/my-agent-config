@@ -10,7 +10,6 @@
       "Bash(pip:*)"
     ]
   },
-  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
