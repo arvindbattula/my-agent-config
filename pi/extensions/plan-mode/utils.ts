@@ -62,6 +62,10 @@ const DESTRUCTIVE_PATTERNS = [
 	/-fls\b/i,
 	/\$\(/, // $(...) command substitution
 	/`/, // backtick command substitution
+	// Block bash /dev/tcp and /dev/udp pseudo-files — these allow network
+	// egress via any file-reading command (cat, head, tail, etc.).
+	/\/dev\/tcp\b/i,
+	/\/dev\/udp\b/i,
 	/\bperl\b/i,
 	/\bruby\b/i,
 	/\bbash\s+-c\b/i,
@@ -167,6 +171,7 @@ export function airgapBlockReason(command: string): string | null {
 export function blockReason(command: string): string | null {
 	if (isSafeCommand(command)) return null;
 	if (/\$\(|`/.test(command)) return "command substitution ($(...) or backticks) not allowed";
+	if (/\/dev\/tcp|\/dev\/udp/i.test(command)) return "network access via /dev/tcp or /dev/udp not allowed";
 	if (/\bcurl\b|\bwget\b|\bnc\b|\bncat\b|\bnetcat\b|\bssh\b|\bscp\b|\bftp\b/i.test(command))
 		return "network access not allowed";
 	if (/\bsystem\s*\(|\beval\b|\bexec\b|\bxargs\b|-exec\b|\bbash\s+-c\b|\bsh\s+-c\b/i.test(command))

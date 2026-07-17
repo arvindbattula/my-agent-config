@@ -528,6 +528,20 @@ While writing the airgap spec, found that `DESTRUCTIVE_PATTERNS` blocked
 the read-only allowlist. Added all missing patterns to `DESTRUCTIVE_PATTERNS`
 — this hardens both normal `--plan` and `--plan-airgap`.
 
+### Pre-existing `/dev/tcp` `/dev/udp` egress gap (found in PR review)
+Bash's `/dev/tcp/host/port` and `/dev/udp/host/port` pseudo-files allow
+network egress via any file-reading command (`cat /dev/tcp/host/port`),
+bypassing the `curl`/`wget`/etc. network block. Added `/dev/tcp` and
+`/dev/udp` to `DESTRUCTIVE_PATTERNS` and a specific block reason in
+`blockReason()`. This hardens both normal `--plan` and `--plan-airgap`.
+
+### Persist-on-toggle (found in PR review)
+`togglePlanMode` and `toggleAirgapMode` update in-memory state but did not
+call `persistState()`, so a session resume could restore stale mode state
+(e.g. `airgap: true` after a downgrade to plain plan). Both toggle functions
+now call `persistState()` after updating state, including the airgap→plan
+downgrade path.
+
 ### Open decisions resolved
 - **D1:** Bash core = `cat grep ls find` + `head tail wc pwd` (all read-only,
   zero egress/mutation risk).

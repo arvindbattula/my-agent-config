@@ -266,6 +266,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			pi.setActiveTools(getPlanModeTools(normalModeTools ?? withoutPlanStepDone(pi.getActiveTools())));
 			ctx.ui.notify("Switched from airgap to plan mode. Memory tools restored; bash still read-only.");
 			updateStatus(ctx);
+			persistState(); // persist airgap:false so resume doesn't restore airgap
 			return;
 		}
 
@@ -289,6 +290,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify("Plan mode disabled. Full access restored.");
 		}
 		updateStatus(ctx);
+		persistState(); // persist mode state so resume restores correctly
 	}
 
 	function toggleAirgapMode(ctx: ExtensionContext): void {
@@ -319,6 +321,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify("Airgap plan mode OFF. Full access restored.");
 		}
 		updateStatus(ctx);
+		persistState(); // persist airgap state so resume restores correctly
 	}
 
 	function persistState(): void {
