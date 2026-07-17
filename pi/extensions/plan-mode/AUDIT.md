@@ -426,11 +426,11 @@ interpretation errors." Not a plan-mode-specific fix but reduces a recurring
 annoyance during plan execution.
 
 **RC3 (output token truncation)** is not directly fixable in the extension —
-it's a core Pi issue. However, the RC2 fix (less context waste + trimmed
-per-event payload) is the primary mitigation: with less context waste, the
-output token budget lasts longer and truncation is less likely. If truncation
-still occurs, the RC4 fix (post-compaction resume) ensures the model can
-recover.
+it's a core Pi issue. However, the RC2 fix (fewer persist calls — only on
+actual state changes, not every turn) is the primary mitigation: with less
+context waste (~3× reduction from ~1.3MB to ~300-450KB), the output token
+budget lasts longer and truncation is less likely. If truncation still
+occurs, the RC4 fix (post-compaction resume) ensures the model can recover.
 
 ### Post-review fixes (2026-07-17)
 

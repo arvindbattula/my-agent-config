@@ -109,7 +109,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			"After completing each plan step, call plan_step_done with the step number. Do not wait — call it as soon as the step is done.",
 		],
 		parameters: Type.Object({
-			step: Type.Number({ description: "The step number to mark as completed (1-based, matching the plan numbering)" }),
+			step: Type.Integer({ description: "The step number to mark as completed (1-based, matching the plan numbering)", minimum: 1 }),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -122,11 +122,14 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
 			const item = todoItems.find((t) => t.step === params.step);
 			if (!item) {
+				const curCompleted = todoItems.filter((t) => t.completed).length;
+				const curRemaining = todoItems.filter((t) => !t.completed);
+				const curNext = curRemaining[0] ?? null;
 				return {
 					content: [
 						{ type: "text", text: `Step ${params.step} not found. Valid steps: 1-${todoItems.length}.` },
 					],
-					details: { step: params.step, completed: 0, total: todoItems.length, next: null } as PlanStepDoneDetails,
+					details: { step: params.step, completed: curCompleted, total: todoItems.length, next: curNext?.step ?? null } as PlanStepDoneDetails,
 				};
 			}
 
@@ -425,7 +428,7 @@ Do NOT attempt to make changes - just describe what you would do.`,
 			// model a reliable re-orientation point.
 			const completed = todoItems.filter((t) => t.completed).length;
 			const remaining = todoItems.filter((t) => !t.completed);
-			const todoList = remaining.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const todoList = remaining.map((t) => `${t.step}. ${t.rawText ?? t.text}`).join("\n");
 			const nextStep = remaining[0];
 			const nextText = nextStep ? nextStep.rawText ?? nextStep.text : "(all steps complete)";
 			return {
@@ -554,7 +557,7 @@ After completing a step, call the plan_step_done tool with the step number. Do n
 			// which does NOT re-fire before_agent_start. The execution context
 			// (remaining steps + the plan_step_done instruction) must therefore be
 			// inlined here; before_agent_start only injects it on later turns.
-			const remaining = todoItems.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const remaining = todoItems.map((t) => `${t.step}. ${t.rawText ?? t.text}`).join("\n");
 			const execMessage = `Execute the plan.
 
 Remaining steps:
@@ -624,7 +627,7 @@ Tip: For git commits with special characters in the message, use git commit -F <
 		if (executing && event.reason === "manual") {
 			const completed = todoItems.filter((t) => t.completed).length;
 			const remaining = todoItems.filter((t) => !t.completed);
-			const todoList = remaining.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const todoList = remaining.map((t) => `${t.step}. ${t.rawText ?? t.text}`).join("\n");
 			const nextStep = remaining[0];
 			const nextText = nextStep ? nextStep.rawText ?? nextStep.text : "(all steps complete)";
 			const resumeMessage = `Context was compacted. Resume the plan.
