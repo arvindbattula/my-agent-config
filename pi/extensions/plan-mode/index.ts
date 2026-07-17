@@ -247,18 +247,15 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	}
 
 	function persistState(): void {
-		// Trim rawText from persisted todos to reduce per-event payload size.
-		// rawText is only needed for prompt injection (before_agent_start), not for
-		// session-state recovery. A 31-step plan with ~200-char rawText per step
-		// saves ~6KB per emit.
-		const slimTodos = todoItems.map((t) => ({
-			step: t.step,
-			text: t.text,
-			completed: t.completed,
-		}));
+		// Persist the full todoItems (including rawText) so that session resume
+		// can rehydrate complete step descriptions for the RC4/RC5 prompt injection.
+		// The rawText field is required for post-resume "Continue with step N: …"
+		// messages — trimming it was a regression that traded ~6KB/emit for worse
+		// resume fidelity. The real context savings come from persist-on-change
+		// (RC2 fix), not from per-event payload trimming.
 		pi.appendEntry("plan-mode", {
 			enabled: planModeEnabled,
-			todos: slimTodos,
+			todos: todoItems,
 			executing: executionMode,
 		});
 	}
@@ -360,7 +357,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			}
 		}
 
-		let execContextSeen = 0;
 		return {
 			messages: event.messages.filter((m, i) => {
 				const msg = m as AgentMessage & { customType?: string };

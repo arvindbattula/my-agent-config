@@ -354,14 +354,12 @@ turn during execution, emitting 90+ identical `plan-mode` custom entries (each
 ~10-15KB with the full todo list including `rawText`) — ~1.3MB of wasted context
 per session. Now `persistState()` is only called when the completion count
 actually increases (checked via before/after delta, not just marker presence).
-Additionally, `persistState()` now strips `rawText` from persisted todos,
-reducing per-event payload by ~40-60%.
 
 With the new "mark each step immediately" instruction, a 31-step plan yields
-~15-31 emits (one per `plan_step_done` call), not the original 90+. Combined
-with the payload trimming, total context waste drops from ~1.3MB to ~300-450KB
-— a ~3× reduction rather than the initially claimed ~15×. The direction is
-correct; the per-event payload was the remaining bloat, now addressed.
+~15-31 emits (one per `plan_step_done` call), not the original 90+. Total
+context waste drops from ~1.3MB to ~300-450KB — a ~3× reduction. The savings
+come almost entirely from the persist-on-change count reduction; the per-event
+payload (including `rawText`) is kept intact to preserve resume fidelity.
 
 **P0 / RC1 — Structured `plan_step_done` tool for step completion.**
 Registered a new LLM-callable tool `plan_step_done(step: number)` that marks a
@@ -445,10 +443,13 @@ files. All fixes are in `index.ts`.
    included `details` in every return. Verified: `tsc --noEmit --strict` clean
    (no type errors in the file beyond expected module-resolution issues).
 
-2. **Per-event payload trimming (P2).** `persistState()` now strips `rawText`
-   from each todo when persisting, since `rawText` is only needed for prompt
-   injection (via `before_agent_start`), not for session-state recovery. This
-   reduces per-event size by ~40-60%.
+2. **Per-event payload: rawText trim reverted (P2).** Initially `persistState()`
+   was changed to strip `rawText` from persisted todos to reduce per-event size.
+   This was a regression: after a real session resume, `rawText` would be gone,
+   degrading the RC4/RC5 prompt injection to use 47-char truncated `text` instead
+   of full step descriptions. Reverted — the full `todoItems` (including
+   `rawText`) are persisted again. The ~3× context reduction comes from
+   persist-on-change, not payload trimming.
 
 3. **Stale context-message accumulation (P2).** The `context` event handler
    now filters `plan-execution-context` and `plan-mode-resume` messages:
