@@ -54,8 +54,18 @@ const DESTRUCTIVE_PATTERNS = [
 	/\bexec\b/i,
 	/\bxargs\b/i,
 	/-exec\b/i,
+	/-execdir\b/i,
+	/-delete\b/i,
+	/-ok(dir)?\b/i,
+	/-fprintf?\b/i,
+	/-fprint0\b/i,
+	/-fls\b/i,
 	/\$\(/, // $(...) command substitution
 	/`/, // backtick command substitution
+	// Block bash /dev/tcp and /dev/udp pseudo-files — these allow network
+	// egress via any file-reading command (cat, head, tail, etc.).
+	/\/dev\/tcp\b/i,
+	/\/dev\/udp\b/i,
 	/\bperl\b/i,
 	/\bruby\b/i,
 	/\bbash\s+-c\b/i,
@@ -120,6 +130,39 @@ export function isSafeCommand(command: string): boolean {
 	return !isDestructive && isSafe;
 }
 
+// Airgap mode: a *tiny* read-only core. Intentionally much smaller than
+// SAFE_PATTERNS. A command must match one of these AND survive every
+// DESTRUCTIVE_PATTERNS check (network, substitution, redirect, find write-flags).
+const AIRGAP_SAFE_PATTERNS = [
+	/^\s*cat\b/,
+	/^\s*grep\b/,
+	/^\s*ls\b/,
+	/^\s*find\b/,
+	/^\s*head\b/,
+	/^\s*tail\b/,
+	/^\s*wc\b/,
+	/^\s*pwd\b/,
+];
+
+export function isAirgapSafeCommand(command: string): boolean {
+	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
+	const isSafe = AIRGAP_SAFE_PATTERNS.some((p) => p.test(command));
+	return !isDestructive && isSafe;
+}
+
+/**
+ * Human-readable reason a command is blocked in airgap mode.
+ * Returns null if the command is actually safe. Reuses the specific reasons
+ * from blockReason for network/substitution/etc., then falls through to the
+ * airgap-specific message.
+ */
+export function airgapBlockReason(command: string): string | null {
+	if (isAirgapSafeCommand(command)) return null;
+	const shared = blockReason(command);
+	if (shared && shared !== "command not on the read-only allowlist") return shared;
+	return "airgap mode allows only: cat, grep, ls, find, head, tail, wc, pwd (local read-only)";
+}
+
 /**
  * Human-readable reason a command is blocked in plan mode.
  * Returns null if the command is actually safe. Order matters: report the
@@ -128,6 +171,7 @@ export function isSafeCommand(command: string): boolean {
 export function blockReason(command: string): string | null {
 	if (isSafeCommand(command)) return null;
 	if (/\$\(|`/.test(command)) return "command substitution ($(...) or backticks) not allowed";
+	if (/\/dev\/tcp|\/dev\/udp/i.test(command)) return "network access via /dev/tcp or /dev/udp not allowed";
 	if (/\bcurl\b|\bwget\b|\bnc\b|\bncat\b|\bnetcat\b|\bssh\b|\bscp\b|\bftp\b/i.test(command))
 		return "network access not allowed";
 	if (/\bsystem\s*\(|\beval\b|\bexec\b|\bxargs\b|-exec\b|\bbash\s+-c\b|\bsh\s+-c\b/i.test(command))
