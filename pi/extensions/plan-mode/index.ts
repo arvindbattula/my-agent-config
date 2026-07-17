@@ -25,6 +25,14 @@ import { blockReason, extractTodoItems, markCompletedSteps, type TodoItem } from
 /** Tool name for the step-completion tool, also used in active-tool management. */
 const PLAN_STEP_DONE_TOOL = "plan_step_done";
 
+/** Details returned by the plan_step_done tool (stored in tool result for branching). */
+interface PlanStepDoneDetails {
+	step: number;
+	completed: number;
+	total: number;
+	next: number | null;
+}
+
 // Local addition (see AUDIT.md): persist a captured plan to a timestamped
 // markdown file in cwd so plans are auditable artifacts, not just session state.
 function writePlanToFile(planText: string): string {
@@ -108,6 +116,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			if (!executionMode || todoItems.length === 0) {
 				return {
 					content: [{ type: "text", text: "Not currently executing a plan. No steps to mark." }],
+					details: { step: params.step, completed: 0, total: 0, next: null } as PlanStepDoneDetails,
 				};
 			}
 
@@ -117,6 +126,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 					content: [
 						{ type: "text", text: `Step ${params.step} not found. Valid steps: 1-${todoItems.length}.` },
 					],
+					details: { step: params.step, completed: 0, total: todoItems.length, next: null } as PlanStepDoneDetails,
 				};
 			}
 
@@ -128,7 +138,20 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			const allDone = remaining.length === 0;
 
 			updateStatus(ctx);
-			persistState(); // State changed — persist (RC2: only persist on change)
+			// Only persist if this call actually changed completion state (not a
+			// re-mark of an already-done step).
+			if (!wasAlreadyDone) {
+				persistState();
+			}
+
+			const next = allDone ? null : remaining[0];
+			const nextText = next ? next.rawText ?? next.text : "";
+			const progressDetails: PlanStepDoneDetails = {
+				step: params.step,
+				completed,
+				total: todoItems.length,
+				next: next ? next.step : null,
+			};
 
 			if (allDone) {
 				return {
@@ -138,18 +161,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 							text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. All ${todoItems.length} steps completed! Plan is finished.`,
 						},
 					],
+					details: progressDetails,
 				};
 			}
 
-			const next = remaining[0];
-			const nextText = next.rawText ?? next.text;
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. Progress: ${completed}/${todoItems.length}. Next: Step ${next.step}: ${nextText}`,
+						text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. Progress: ${completed}/${todoItems.length}. Next: Step ${next!.step}: ${nextText}`,
 					},
 				],
+				details: progressDetails,
 			};
 		},
 
@@ -224,9 +247,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	}
 
 	function persistState(): void {
+		// Trim rawText from persisted todos to reduce per-event payload size.
+		// rawText is only needed for prompt injection (before_agent_start), not for
+		// session-state recovery. A 31-step plan with ~200-char rawText per step
+		// saves ~6KB per emit.
+		const slimTodos = todoItems.map((t) => ({
+			step: t.step,
+			text: t.text,
+			completed: t.completed,
+		}));
 		pi.appendEntry("plan-mode", {
 			enabled: planModeEnabled,
-			todos: todoItems,
+			todos: slimTodos,
 			executing: executionMode,
 		});
 	}
@@ -300,24 +332,59 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		lastBlockedCommand = null;
 	});
 
-	// Filter out stale plan mode context when not in plan mode
+	// Filter out stale plan-mode messages from context.
+	// - plan-mode-context: stripped when not in plan mode (original behavior)
+	// - plan-execution-context / plan-mode-resume: stripped when not in execution
+	//   mode. During execution, only the LATEST one is kept — older per-turn
+	//   injections with stale progress numbers are removed to avoid context bloat
+	//   and contradictory step instructions (P2 fix from review).
 	pi.on("context", async (event) => {
-		if (planModeEnabled) return;
+		// Custom types to filter entirely when their mode is inactive
+		const inactiveTypes = new Set<string>();
+		if (!planModeEnabled) inactiveTypes.add("plan-mode-context");
+		if (!executionMode) {
+			inactiveTypes.add("plan-execution-context");
+			inactiveTypes.add("plan-mode-resume");
+		}
 
-		return {
-			messages: event.messages.filter((m) => {
-				const msg = m as AgentMessage & { customType?: string };
-				if (msg.customType === "plan-mode-context") return false;
-				if (msg.role !== "user") return true;
-
-				const content = msg.content;
-				if (typeof content === "string") {
-					return !content.includes("[PLAN MODE ACTIVE]");
+		// When executing, keep only the last plan-execution-context or
+		// plan-mode-resume — drop older ones with stale progress.
+		let lastExecContextIdx = -1;
+		if (executionMode) {
+			for (let i = event.messages.length - 1; i >= 0; i--) {
+				const msg = event.messages[i] as AgentMessage & { customType?: string };
+				if (msg.customType === "plan-execution-context" || msg.customType === "plan-mode-resume") {
+					lastExecContextIdx = i;
+					break;
 				}
-				if (Array.isArray(content)) {
-					return !content.some(
-						(c) => c.type === "text" && (c as TextContent).text?.includes("[PLAN MODE ACTIVE]"),
-					);
+			}
+		}
+
+		let execContextSeen = 0;
+		return {
+			messages: event.messages.filter((m, i) => {
+				const msg = m as AgentMessage & { customType?: string };
+
+				// Drop inactive-mode custom messages
+				if (msg.customType && inactiveTypes.has(msg.customType)) return false;
+
+				// During execution, drop older plan-execution-context / plan-mode-resume
+				if (executionMode && (msg.customType === "plan-execution-context" || msg.customType === "plan-mode-resume")) {
+					if (i === lastExecContextIdx) return true; // keep the latest one
+					return false; // drop stale ones
+				}
+
+				// Original: filter [PLAN MODE ACTIVE] from user messages when not in plan mode
+				if (!planModeEnabled && msg.role === "user") {
+					const content = msg.content;
+					if (typeof content === "string") {
+						return !content.includes("[PLAN MODE ACTIVE]");
+					}
+					if (Array.isArray(content)) {
+						return !content.some(
+							(c) => c.type === "text" && (c as TextContent).text?.includes("[PLAN MODE ACTIVE]"),
+						);
+					}
 				}
 				return true;
 			}),
@@ -388,14 +455,20 @@ After completing a step, call the plan_step_done tool with the step number. Do n
 	// RC2 fix: only persist (emit plan-mode event) when the completion state
 	// actually changes. Previously persistState() ran on every turn_end,
 	// emitting 90+ identical plan-mode entries that wasted ~1.3MB of context.
+	// P3 fix from review: check actual state delta, not just marker count —
+	// a model repeating [DONE:5] for an already-done step won't re-persist.
 	pi.on("turn_end", async (event, ctx) => {
 		if (!executionMode || todoItems.length === 0) return;
 		if (!isAssistantMessage(event.message)) return;
 
+		const beforeCompleted = todoItems.filter((t) => t.completed).length;
 		const text = getTextContent(event.message);
-		if (markCompletedSteps(text, todoItems) > 0) {
+		markCompletedSteps(text, todoItems);
+		const afterCompleted = todoItems.filter((t) => t.completed).length;
+
+		if (afterCompleted > beforeCompleted) {
 			updateStatus(ctx);
-			persistState(); // State changed — emit a plan-mode entry
+			persistState(); // State actually changed — emit a plan-mode entry
 		}
 		// If nothing changed, do NOT persist. This is the RC2 fix.
 	});

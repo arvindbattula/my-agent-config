@@ -351,11 +351,17 @@ handoff (`~/outputs/plan-mode-fix-handoff.md`). All fixes are in `index.ts`.
 **P0 / RC2 — Stop spamming plan state after every turn.**
 `turn_end` previously called `persistState()` unconditionally on every assistant
 turn during execution, emitting 90+ identical `plan-mode` custom entries (each
-~10-15KB with the full todo list) — ~1.3MB of wasted context per session. Now
-`persistState()` is only called when `markCompletedSteps()` detects an actual
-completion-state change. This alone reduces 90+ events to ~5-6 in a typical
-session, reclaiming context budget and directly preventing the RC3 (truncation)
-and RC4 (compaction) cascade.
+~10-15KB with the full todo list including `rawText`) — ~1.3MB of wasted context
+per session. Now `persistState()` is only called when the completion count
+actually increases (checked via before/after delta, not just marker presence).
+Additionally, `persistState()` now strips `rawText` from persisted todos,
+reducing per-event payload by ~40-60%.
+
+With the new "mark each step immediately" instruction, a 31-step plan yields
+~15-31 emits (one per `plan_step_done` call), not the original 90+. Combined
+with the payload trimming, total context waste drops from ~1.3MB to ~300-450KB
+— a ~3× reduction rather than the initially claimed ~15×. The direction is
+correct; the per-event payload was the remaining bloat, now addressed.
 
 **P0 / RC1 — Structured `plan_step_done` tool for step completion.**
 Registered a new LLM-callable tool `plan_step_done(step: number)` that marks a
@@ -366,9 +372,11 @@ ad-hoc `[DONE:N]` text-marker hack (RC6) with a structured mechanism. The
 `[DONE:N]` text parsing in `turn_end` is kept as a fallback for backward
 compatibility — if the model writes `[DONE:N]` in text, it still works.
 
-The tool's `execute()` updates `todoItems`, calls `updateStatus()` +
-`persistState()`, and returns a progress summary (`Progress: 15/31. Next:
-Step 16: ...`). Custom `renderCall`/`renderResult` show the step number and
+The tool's `execute()` returns a properly typed `AgentToolResult<PlanStepDoneDetails>`
+with a `details` object (`{ step, completed, total, next }`) for branching
+support, plus a text content summary. The `execute()` only calls
+`persistState()` when the step wasn't already done (avoids redundant emits
+from re-marks). Custom `renderCall`/`renderResult` show the step number and
 result in the TUI.
 
 Tool lifecycle management:
@@ -393,6 +401,13 @@ Two improvements:
    including after compaction (non-overflow), giving the model a reliable
    re-orientation point.
 
+**Stale context cleanup (review fix):** The `context` event handler now filters
+out old `plan-execution-context` and `plan-mode-resume` messages, keeping only
+the latest one during execution and stripping all when execution ends. This
+prevents stale "Continue with step N" messages with outdated progress from
+accumulating in the transcript — which would partially reintroduce the RC2
+bloat the fix was meant to eliminate.
+
 **P1 / RC5 — Structured step-start signal.**
 The enhanced `before_agent_start` execution context and the `plan-mode-execute`
 message both now explicitly identify the starting step (`Start with step 1:`)
@@ -413,10 +428,42 @@ interpretation errors." Not a plan-mode-specific fix but reduces a recurring
 annoyance during plan execution.
 
 **RC3 (output token truncation)** is not directly fixable in the extension —
-it's a core Pi issue. However, the RC2 fix (reclaiming ~1.3MB of context) is
-the primary mitigation: with less context waste, the output token budget lasts
-longer and truncation is less likely. If truncation still occurs, the RC4 fix
-(post-compaction resume) ensures the model can recover.
+it's a core Pi issue. However, the RC2 fix (less context waste + trimmed
+per-event payload) is the primary mitigation: with less context waste, the
+output token budget lasts longer and truncation is less likely. If truncation
+still occurs, the RC4 fix (post-compaction resume) ensures the model can
+recover.
+
+### Post-review fixes (2026-07-17)
+
+Applied after a thorough code review against the installed v0.79.10 `.d.ts`
+files. All fixes are in `index.ts`.
+
+1. **`AgentToolResult` contract violation (P1).** All four `plan_step_done`
+   return branches were missing the required `details` field. Added a typed
+   `PlanStepDoneDetails` interface (`{ step, completed, total, next }`) and
+   included `details` in every return. Verified: `tsc --noEmit --strict` clean
+   (no type errors in the file beyond expected module-resolution issues).
+
+2. **Per-event payload trimming (P2).** `persistState()` now strips `rawText`
+   from each todo when persisting, since `rawText` is only needed for prompt
+   injection (via `before_agent_start`), not for session-state recovery. This
+   reduces per-event size by ~40-60%.
+
+3. **Stale context-message accumulation (P2).** The `context` event handler
+   now filters `plan-execution-context` and `plan-mode-resume` messages:
+   during execution, only the latest one is kept (older ones with stale
+   progress are dropped); when execution ends, all are stripped. This prevents
+   the per-turn injection from reintroducing the bloat RC2 was meant to kill.
+
+4. **State-delta check in `turn_end` (P3).** Replaced `markCompletedSteps() >
+   0` (which counts markers found, not actual state changes) with a
+   before/after completion-count delta. A model repeating `[DONE:5]` for an
+   already-done step no longer triggers a redundant `persistState()`.
+
+5. **`plan_step_done` re-mark guard (P3).** The tool's `execute()` now checks
+   `wasAlreadyDone` before calling `persistState()`, avoiding double-persist
+   when the model re-marks an already-completed step.
 
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 
