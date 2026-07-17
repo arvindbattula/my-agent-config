@@ -343,6 +343,81 @@ trace (pi-agent-core `dist/agent.js`, v0.79.10):
 
 Verified: `tsc --noEmit --strict` clean against the installed v0.79.10 `.d.ts`.
 
+### Plan-mode root-cause fixes (2026-07-17)
+
+Implemented fixes for the 7 root causes identified in the plan-mode investigation
+handoff (`~/outputs/plan-mode-fix-handoff.md`). All fixes are in `index.ts`.
+
+**P0 / RC2 — Stop spamming plan state after every turn.**
+`turn_end` previously called `persistState()` unconditionally on every assistant
+turn during execution, emitting 90+ identical `plan-mode` custom entries (each
+~10-15KB with the full todo list) — ~1.3MB of wasted context per session. Now
+`persistState()` is only called when `markCompletedSteps()` detects an actual
+completion-state change. This alone reduces 90+ events to ~5-6 in a typical
+session, reclaiming context budget and directly preventing the RC3 (truncation)
+and RC4 (compaction) cascade.
+
+**P0 / RC1 — Structured `plan_step_done` tool for step completion.**
+Registered a new LLM-callable tool `plan_step_done(step: number)` that marks a
+plan step as completed and returns the current progress + next step. The tool
+is always registered but only added to the active tool set during execution
+(via `withPlanStepDone()` / `withoutPlanStepDone()` helpers). This replaces the
+ad-hoc `[DONE:N]` text-marker hack (RC6) with a structured mechanism. The
+`[DONE:N]` text parsing in `turn_end` is kept as a fallback for backward
+compatibility — if the model writes `[DONE:N]` in text, it still works.
+
+The tool's `execute()` updates `todoItems`, calls `updateStatus()` +
+`persistState()`, and returns a progress summary (`Progress: 15/31. Next:
+Step 16: ...`). Custom `renderCall`/`renderResult` show the step number and
+result in the TUI.
+
+Tool lifecycle management:
+- **Execution starts** (`agent_end` Execute branch): `setActiveTools(withPlanStepDone(restore))`
+- **Execution ends** (`finalizePlan`): `setActiveTools(withoutPlanStepDone(restore))`
+- **Plan mode toggle** (`togglePlanMode`): snapshots filter out the tool via `withoutPlanStepDone`
+- **Session resume** (`session_start`): if resuming mid-execution, adds the tool to active set
+
+**P1 / RC4 — Post-compaction auto-resume with plan state injection.**
+Two improvements:
+1. `session_compact` for `manual` compaction during execution now sends a
+   `plan-mode-resume` follow-up message with the full plan state (progress,
+   next step, remaining steps, `plan_step_done` instruction). This triggers a
+   new turn so the model auto-resumes without the user having to say
+   "continue". For `threshold`/`overflow` compaction, the run continues and
+   `before_agent_start` re-injects context on the next turn (or the retry
+   handles it — see existing AUDIT notes on overflow).
+2. `before_agent_start` execution context now shows progress (`15/31 steps
+   completed`), identifies the next step explicitly (`Continue with step 16:
+   ...`), and instructs the model to use `plan_step_done` instead of
+   `[DONE:N]`. This fires on every user-initiated turn during execution,
+   including after compaction (non-overflow), giving the model a reliable
+   re-orientation point.
+
+**P1 / RC5 — Structured step-start signal.**
+The enhanced `before_agent_start` execution context and the `plan-mode-execute`
+message both now explicitly identify the starting step (`Start with step 1:`)
+and instruct the model to call `plan_step_done` after each step. This gives the
+model a clear, structured signal for which step to work on, replacing the old
+pattern where the model just started making edits with no step signal.
+
+**P3 / RC6 — [DONE:N] deprecated in favor of the tool.**
+All prompts now instruct the model to use `plan_step_done` instead of
+`[DONE:N]` markers. The `[DONE:N]` parsing in `turn_end` and `session_start`
+re-scan is kept as a fallback — if a model writes `[DONE:N]` in text, it still
+works. The `before_agent_start` context mentions `[DONE:n]` as a fallback.
+
+**P3 / RC7 — Git commit escaping tip.**
+Added a tip to the execution message: "For git commits with special characters
+in the message, use `git commit -F <file>` instead of `-m` to avoid shell
+interpretation errors." Not a plan-mode-specific fix but reduces a recurring
+annoyance during plan execution.
+
+**RC3 (output token truncation)** is not directly fixable in the extension —
+it's a core Pi issue. However, the RC2 fix (reclaiming ~1.3MB of context) is
+the primary mitigation: with less context waste, the output token budget lasts
+longer and truncation is less likely. If truncation still occurs, the RC4 fix
+(post-compaction resume) ensures the model can recover.
+
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 
 These were considered and intentionally deferred to avoid speculative

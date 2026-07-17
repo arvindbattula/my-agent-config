@@ -8,16 +8,22 @@
  * - /plan command or Ctrl+Alt+P to toggle
  * - Bash restricted to allowlisted read-only commands
  * - Extracts numbered plan steps from "Plan:" sections
- * - [DONE:n] markers to complete steps during execution
+ * - `plan_step_done` tool for the model to mark steps complete during execution
+ * - [DONE:n] text markers as a fallback completion mechanism (still parsed)
  * - Progress tracking widget during execution
+ * - Post-compaction auto-resume with plan state injection
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key } from "@earendil-works/pi-tui";
+import { Key, Text } from "@earendil-works/pi-tui";
 import { writeFileSync } from "node:fs";
+import { Type } from "typebox";
 import { blockReason, extractTodoItems, markCompletedSteps, type TodoItem } from "./utils.ts";
+
+/** Tool name for the step-completion tool, also used in active-tool management. */
+const PLAN_STEP_DONE_TOOL = "plan_step_done";
 
 // Local addition (see AUDIT.md): persist a captured plan to a timestamped
 // markdown file in cwd so plans are auditable artifacts, not just session state.
@@ -32,6 +38,16 @@ function writePlanToFile(planText: string): string {
 
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
+
+/** Add the plan_step_done tool to a tools list (if not already present). */
+function withPlanStepDone(tools: string[]): string[] {
+	return tools.includes(PLAN_STEP_DONE_TOOL) ? tools : [...tools, PLAN_STEP_DONE_TOOL];
+}
+
+/** Remove the plan_step_done tool from a tools list. */
+function withoutPlanStepDone(tools: string[]): string[] {
+	return tools.filter((t) => t !== PLAN_STEP_DONE_TOOL);
+}
 // Built-in tools disabled in plan mode. Everything else that is currently active
 // (e.g. Hindsight memory tools) stays available so the agent can recall/retain
 // context while planning. NOTE: the bash allowlist (utils.ts) only constrains
@@ -68,6 +84,88 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	// Dedupe block notifications: skip notifying if the same command was just blocked
 	// (the model often retries a rejected command several times).
 	let lastBlockedCommand: string | null = null;
+
+	// ── plan_step_done tool ──────────────────────────────────────────────
+	// Registers a structured tool the model can call to mark a plan step as
+	// complete, replacing the ad-hoc [DONE:N] text-marker hack (RC1/RC6).
+	// The tool is always registered but only added to the active tool set
+	// during execution mode (see withPlanStepDone / withoutPlanStepDone).
+	// [DONE:N] text parsing is kept as a fallback for backward compatibility.
+	pi.registerTool({
+		name: PLAN_STEP_DONE_TOOL,
+		label: "Plan Step Done",
+		description:
+			"Mark a plan step as completed during plan execution. Call this immediately after finishing a step. Returns current progress and the next step to work on.",
+		promptSnippet: "Mark a plan step as complete (call after finishing each step).",
+		promptGuidelines: [
+			"After completing each plan step, call plan_step_done with the step number. Do not wait — call it as soon as the step is done.",
+		],
+		parameters: Type.Object({
+			step: Type.Number({ description: "The step number to mark as completed (1-based, matching the plan numbering)" }),
+		}),
+
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (!executionMode || todoItems.length === 0) {
+				return {
+					content: [{ type: "text", text: "Not currently executing a plan. No steps to mark." }],
+				};
+			}
+
+			const item = todoItems.find((t) => t.step === params.step);
+			if (!item) {
+				return {
+					content: [
+						{ type: "text", text: `Step ${params.step} not found. Valid steps: 1-${todoItems.length}.` },
+					],
+				};
+			}
+
+			const wasAlreadyDone = item.completed;
+			item.completed = true;
+
+			const completed = todoItems.filter((t) => t.completed).length;
+			const remaining = todoItems.filter((t) => !t.completed);
+			const allDone = remaining.length === 0;
+
+			updateStatus(ctx);
+			persistState(); // State changed — persist (RC2: only persist on change)
+
+			if (allDone) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. All ${todoItems.length} steps completed! Plan is finished.`,
+						},
+					],
+				};
+			}
+
+			const next = remaining[0];
+			const nextText = next.rawText ?? next.text;
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. Progress: ${completed}/${todoItems.length}. Next: Step ${next.step}: ${nextText}`,
+					},
+				],
+			};
+		},
+
+		renderCall(args, theme) {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("plan_step_done ")) + theme.fg("accent", `step ${args.step}`),
+				0,
+				0,
+			);
+		},
+
+		renderResult(result, _opts, theme) {
+			const text = result.content[0];
+			return new Text(theme.fg("success", "✓ ") + theme.fg("muted", text?.type === "text" ? text.text : ""), 0, 0);
+		},
+	});
 
 	pi.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
@@ -111,11 +209,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		if (planModeEnabled) {
 			// Snapshot current tools so we can restore them exactly on exit.
 			// This preserves any tools injected by core or other extensions.
-			normalModeTools = pi.getActiveTools();
+			// Filter out plan_step_done — it should not be in the snapshot since
+			// we're leaving execution mode (if we were in it).
+			normalModeTools = withoutPlanStepDone(pi.getActiveTools());
 			pi.setActiveTools(getPlanModeTools(normalModeTools));
 			ctx.ui.notify("Plan mode enabled. Built-in edit/write disabled; other tools (incl. memory) preserved.");
 		} else {
-			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
+			const restore = withoutPlanStepDone(normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"]);
 			pi.setActiveTools(restore);
 			normalModeTools = null;
 			ctx.ui.notify("Plan mode disabled. Full access restored.");
@@ -151,7 +251,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		// back to the live set (not a hardcoded list) so we never clobber injected
 		// tools (e.g. Hindsight). normalModeTools is null in the normal flow; the ??
 		// only guards a hypothetical non-null snapshot.
-		const restore = normalModeTools ?? pi.getActiveTools();
+		// RC1 fix: remove the plan_step_done tool — it's only relevant during execution.
+		const restore = withoutPlanStepDone(normalModeTools ?? pi.getActiveTools());
 		pi.setActiveTools(restore);
 		normalModeTools = null;
 		updateStatus(ctx);
@@ -254,25 +355,39 @@ Do NOT attempt to make changes - just describe what you would do.`,
 		}
 
 		if (executionMode && todoItems.length > 0) {
+			// RC4/RC5 fix: inject a rich execution context that shows progress,
+			// identifies the next step, and instructs the model to use the
+			// plan_step_done tool. This fires on every user-initiated turn during
+			// execution, including after compaction (non-overflow), giving the
+			// model a reliable re-orientation point.
+			const completed = todoItems.filter((t) => t.completed).length;
 			const remaining = todoItems.filter((t) => !t.completed);
 			const todoList = remaining.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const nextStep = remaining[0];
+			const nextText = nextStep ? nextStep.rawText ?? nextStep.text : "(all steps complete)";
 			return {
 				message: {
 					customType: "plan-execution-context",
-					content: `[EXECUTING PLAN - Full tool access enabled]
+					content: `[EXECUTING PLAN — Full tool access enabled]
+
+Progress: ${completed}/${todoItems.length} steps completed.
+
+Continue with step ${nextStep?.step ?? "?"}: ${nextText}
 
 Remaining steps:
 ${todoList}
 
-Execute each step in order.
-After completing a step, include a [DONE:n] tag in your response.`,
+After completing a step, call the plan_step_done tool with the step number. Do not wait — call it as soon as the step is done. (You can also write [DONE:n] in your response as a fallback.)`,
 					display: false,
 				},
 			};
 		}
 	});
 
-	// Track progress after each turn
+	// Track progress after each turn.
+	// RC2 fix: only persist (emit plan-mode event) when the completion state
+	// actually changes. Previously persistState() ran on every turn_end,
+	// emitting 90+ identical plan-mode entries that wasted ~1.3MB of context.
 	pi.on("turn_end", async (event, ctx) => {
 		if (!executionMode || todoItems.length === 0) return;
 		if (!isAssistantMessage(event.message)) return;
@@ -280,8 +395,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		const text = getTextContent(event.message);
 		if (markCompletedSteps(text, todoItems) > 0) {
 			updateStatus(ctx);
+			persistState(); // State changed — emit a plan-mode entry
 		}
-		persistState();
+		// If nothing changed, do NOT persist. This is the RC2 fix.
 	});
 
 	// Handle plan completion and plan mode UI
@@ -357,7 +473,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			planModeEnabled = false;
 			executionMode = true;
 			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
-			pi.setActiveTools(restore);
+			// RC1 fix: include the plan_step_done tool so the model can mark steps
+			// complete via a structured tool call instead of [DONE:N] text markers.
+			pi.setActiveTools(withPlanStepDone(restore));
 			normalModeTools = null;
 			updateStatus(ctx);
 			persistState();
@@ -365,16 +483,18 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			// agent_end fires while the agent is still streaming, so this turn is
 			// delivered via the follow-up queue and run through agent.continue() —
 			// which does NOT re-fire before_agent_start. The execution context
-			// (remaining steps + the [DONE:n] instruction) must therefore be inlined
-			// here; before_agent_start only injects it on later user-initiated turns.
+			// (remaining steps + the plan_step_done instruction) must therefore be
+			// inlined here; before_agent_start only injects it on later turns.
 			const remaining = todoItems.map((t) => `${t.step}. ${t.text}`).join("\n");
 			const execMessage = `Execute the plan.
 
 Remaining steps:
 ${remaining}
 
-Start with: ${todoItems[0].rawText ?? todoItems[0].text}
-After completing a step, include a [DONE:n] tag in your response.`;
+Start with step ${todoItems[0].step}: ${todoItems[0].rawText ?? todoItems[0].text}
+After completing a step, call the plan_step_done tool with the step number to mark it complete. Do not wait — call it as soon as the step is done.
+
+Tip: For git commits with special characters in the message, use git commit -F <file> instead of -m to avoid shell interpretation errors.`;
 			pi.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
 				{ triggerTurn: true, deliverAs: "followUp" },
@@ -425,6 +545,32 @@ After completing a step, include a [DONE:n] tag in your response.`;
 		if (executing) {
 			// Re-establish the [DONE:n] scan boundary past the compaction point.
 			pi.appendEntry("plan-mode-execute", { reanchored: true });
+		}
+
+		// RC4 fix: for manual compaction during execution, send a continuation
+		// message with the current plan state so the model can auto-resume
+		// without the user having to say "continue". For threshold compaction,
+		// the run continues and before_agent_start will re-inject context on the
+		// next turn. For overflow+willRetry, the retry handles it (see AUDIT.md).
+		if (executing && event.reason === "manual") {
+			const completed = todoItems.filter((t) => t.completed).length;
+			const remaining = todoItems.filter((t) => !t.completed);
+			const todoList = remaining.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const nextStep = remaining[0];
+			const nextText = nextStep ? nextStep.rawText ?? nextStep.text : "(all steps complete)";
+			const resumeMessage = `Context was compacted. Resume the plan.
+
+Progress: ${completed}/${todoItems.length} steps completed.
+Continue with step ${nextStep?.step ?? "?"}: ${nextText}
+
+Remaining steps:
+${todoList}
+
+After completing a step, call the plan_step_done tool with the step number.`;
+			pi.sendMessage(
+				{ customType: "plan-mode-resume", content: resumeMessage, display: true },
+				{ triggerTurn: true, deliverAs: "followUp" },
+			);
 		}
 
 		if (!ctx.hasUI) return;
@@ -494,8 +640,15 @@ After completing a step, include a [DONE:n] tag in your response.`;
 		if (planModeEnabled) {
 			// Snapshot current tools before restricting, so we can restore them
 			// exactly when plan mode is disabled (preserves Hindsight tools, etc.).
-			normalModeTools = pi.getActiveTools();
+			// Filter out plan_step_done — not relevant in plan mode.
+			normalModeTools = withoutPlanStepDone(pi.getActiveTools());
 			pi.setActiveTools(getPlanModeTools(normalModeTools));
+		} else if (executionMode && todoItems.length > 0) {
+			// RC1 fix: ensure plan_step_done is available when resuming mid-execution.
+			const current = pi.getActiveTools();
+			if (!current.includes(PLAN_STEP_DONE_TOOL)) {
+				pi.setActiveTools(withPlanStepDone(current));
+			}
 		}
 		updateStatus(ctx);
 	});
