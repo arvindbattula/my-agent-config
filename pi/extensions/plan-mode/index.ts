@@ -20,7 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Key, Text } from "@earendil-works/pi-tui";
 import { writeFileSync } from "node:fs";
 import { Type } from "typebox";
-import { blockReason, extractTodoItems, markCompletedSteps, type TodoItem } from "./utils.ts";
+import { airgapBlockReason, blockReason, extractTodoItems, markCompletedSteps, type TodoItem } from "./utils.ts";
 
 /** Tool name for the step-completion tool, also used in active-tool management. */
 const PLAN_STEP_DONE_TOOL = "plan_step_done";
@@ -47,6 +47,13 @@ function writePlanToFile(planText: string): string {
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 
+// Airgap mode: fixed baseline. Deliberately does NOT union with active tools —
+// that is the whole point of airgap: strip every injected tool (Hindsight, etc.)
+// that could egress to a remote backend. Only local read-only baseline +
+// questionnaire + tiny-core bash remain. plan_step_done is not relevant during
+// planning.
+const AIRGAP_MODE_TOOLS = ["read", "grep", "find", "ls", "questionnaire", "bash"];
+
 /** Add the plan_step_done tool to a tools list (if not already present). */
 function withPlanStepDone(tools: string[]): string[] {
 	return tools.includes(PLAN_STEP_DONE_TOOL) ? tools : [...tools, PLAN_STEP_DONE_TOOL];
@@ -70,6 +77,16 @@ function getPlanModeTools(activeTools: string[]): string[] {
 	return [...new Set([...activeTools.filter((t) => !PLAN_MODE_DISABLED_TOOLS.has(t)), ...PLAN_MODE_TOOLS])];
 }
 
+/**
+ * Airgap tool selector — the security-critical piece.
+ * Returns a FIXED list. Does NOT union with active tools, unlike
+ * getPlanModeTools(). This strips every injected tool (Hindsight, etc.) that
+ * could egress to a remote backend.
+ */
+function getAirgapModeTools(): string[] {
+	return [...AIRGAP_MODE_TOOLS];
+}
+
 // Type guard for assistant messages
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
 	return m.role === "assistant" && Array.isArray(m.content);
@@ -85,6 +102,7 @@ function getTextContent(message: AssistantMessage): string {
 
 export default function planModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
+	let airgapMode = false; // stricter plan mode: no network, no injected tools, tiny bash core
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
 	/** Snapshot of active tools before plan mode was enabled. */
@@ -199,11 +217,19 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		default: false,
 	});
 
+	pi.registerFlag("plan-airgap", {
+		description: "Start in airgap plan mode (read-only, no network, no injected tools)",
+		type: "boolean",
+		default: false,
+	});
+
 	function updateStatus(ctx: ExtensionContext): void {
 		// Footer status
 		if (executionMode && todoItems.length > 0) {
 			const completed = todoItems.filter((t) => t.completed).length;
 			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", `📋 ${completed}/${todoItems.length}`));
+		} else if (airgapMode) {
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("error", "🔒 airgap"));
 		} else if (planModeEnabled) {
 			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", "⏸ plan"));
 		} else {
@@ -228,6 +254,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
 	function togglePlanMode(ctx: ExtensionContext): void {
 		planModeEnabled = !planModeEnabled;
+		airgapMode = false; // D2: entering plain plan clears airgap (mutually exclusive)
 		executionMode = false;
 		todoItems = [];
 		lastBlockedCommand = null;
@@ -249,6 +276,31 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		updateStatus(ctx);
 	}
 
+	function toggleAirgapMode(ctx: ExtensionContext): void {
+		const turningOn = !airgapMode;
+		// Always reset execution state when (re)entering a planning mode.
+		executionMode = false;
+		todoItems = [];
+		lastBlockedCommand = null;
+
+		if (turningOn) {
+			// Snapshot the FULL current tool set so exit restores injected tools too.
+			normalModeTools = withoutPlanStepDone(pi.getActiveTools());
+			airgapMode = true;
+			planModeEnabled = true; // airgap ⊂ plan
+			pi.setActiveTools(getAirgapModeTools());
+			ctx.ui.notify("Airgap plan mode ON. No network, no memory/injected tools; bash limited to cat/grep/ls/find/head/tail/wc/pwd.");
+		} else {
+			airgapMode = false;
+			planModeEnabled = false;
+			const restore = withoutPlanStepDone(normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"]);
+			pi.setActiveTools(restore);
+			normalModeTools = null;
+			ctx.ui.notify("Airgap plan mode OFF. Full access restored.");
+		}
+		updateStatus(ctx);
+	}
+
 	function persistState(): void {
 		// Persist the full todoItems (including rawText) so that session resume
 		// can rehydrate complete step descriptions for the RC4/RC5 prompt injection.
@@ -258,6 +310,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		// (RC2 fix), not from per-event payload trimming.
 		pi.appendEntry("plan-mode", {
 			enabled: planModeEnabled,
+			airgap: airgapMode,
 			todos: todoItems,
 			executing: executionMode,
 		});
@@ -296,6 +349,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		handler: async (_args, ctx) => togglePlanMode(ctx),
 	});
 
+	pi.registerCommand("plan-airgap", {
+		description: "Toggle airgap plan mode (no network, no memory tools, tiny bash core)",
+		handler: async (_args, ctx) => toggleAirgapMode(ctx),
+	});
+
 	pi.registerCommand("todos", {
 		description: "Show current plan todo list",
 		handler: async (_args, ctx) => {
@@ -313,12 +371,17 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		handler: async (ctx) => togglePlanMode(ctx),
 	});
 
+	pi.registerShortcut(Key.ctrlAlt("a"), {
+		description: "Toggle airgap plan mode",
+		handler: async (ctx) => toggleAirgapMode(ctx),
+	});
+
 	// Block destructive bash commands in plan mode
 	pi.on("tool_call", async (event, ctx) => {
 		if (!planModeEnabled || event.toolName !== "bash") return;
 
 		const command = event.input.command as string;
-		const why = blockReason(command);
+		const why = airgapMode ? airgapBlockReason(command) : blockReason(command);
 		if (why) {
 			if (command !== lastBlockedCommand) {
 				ctx.ui.notify(`⏸ Plan mode blocked (${why}): ${command}`, "warning");
@@ -377,11 +440,11 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 				if (!planModeEnabled && msg.role === "user") {
 					const content = msg.content;
 					if (typeof content === "string") {
-						return !content.includes("[PLAN MODE ACTIVE]");
+						return !content.includes("[PLAN MODE ACTIVE]") && !content.includes("[AIRGAP PLAN MODE ACTIVE]");
 					}
 					if (Array.isArray(content)) {
 						return !content.some(
-							(c) => c.type === "text" && (c as TextContent).text?.includes("[PLAN MODE ACTIVE]"),
+							(c) => c.type === "text" && ((c as TextContent).text?.includes("[PLAN MODE ACTIVE]") || (c as TextContent).text?.includes("[AIRGAP PLAN MODE ACTIVE]")),
 						);
 					}
 				}
@@ -392,6 +455,26 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 
 	// Inject plan/execution context before agent starts
 	pi.on("before_agent_start", async () => {
+		if (airgapMode) {
+			return {
+				message: {
+					customType: "plan-mode-context",
+					content: `[AIRGAP PLAN MODE ACTIVE]
+Read-only exploration with a no-exfiltration posture.
+
+Restrictions:
+- edit/write disabled; NO file modifications
+- NO network of any kind
+- NO memory tools (Hindsight recall/retain/etc. are disabled this session)
+- bash limited to: cat, grep, ls, find, head, tail, wc, pwd (local read-only)
+- Use the questionnaire tool for clarifying questions
+
+Produce a numbered plan under a "Plan:" header. Do NOT attempt changes.`,
+					display: false,
+				},
+			};
+		}
+
 		if (planModeEnabled) {
 			return {
 				message: {
@@ -542,6 +625,14 @@ After completing a step, call the plan_step_done tool with the step number. Do n
 		if (!planModeEnabled) return;
 
 		if (choice?.startsWith("Execute")) {
+			if (airgapMode) {
+				const ok = await ctx.ui.select(
+					"Executing exits airgap and restores network, edit/write, and memory tools. Continue?",
+					["Execute (exit airgap)", "Stay in airgap"],
+				);
+				if (ok !== "Execute (exit airgap)") return;
+				airgapMode = false;
+			}
 			planModeEnabled = false;
 			executionMode = true;
 			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
@@ -669,16 +760,22 @@ After completing a step, call the plan_step_done tool with the step number.`;
 		if (event.reason === "startup" && pi.getFlag("plan") === true) {
 			planModeEnabled = true;
 		}
+		// --plan-airgap flag: airgap wins if both --plan and --plan-airgap are passed.
+		if (event.reason === "startup" && pi.getFlag("plan-airgap") === true) {
+			airgapMode = true;
+			planModeEnabled = true;
+		}
 
 		const entries = ctx.sessionManager.getEntries();
 
 		// Restore persisted state
 		const planModeEntry = entries
 			.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === "plan-mode")
-			.pop() as { data?: { enabled: boolean; todos?: TodoItem[]; executing?: boolean } } | undefined;
+			.pop() as { data?: { enabled: boolean; airgap?: boolean; todos?: TodoItem[]; executing?: boolean } } | undefined;
 
 		if (planModeEntry?.data) {
 			planModeEnabled = planModeEntry.data.enabled ?? planModeEnabled;
+			airgapMode = planModeEntry.data.airgap ?? airgapMode;
 			todoItems = planModeEntry.data.todos ?? todoItems;
 			executionMode = planModeEntry.data.executing ?? executionMode;
 		}
@@ -709,7 +806,10 @@ After completing a step, call the plan_step_done tool with the step number.`;
 			markCompletedSteps(allText, todoItems);
 		}
 
-		if (planModeEnabled) {
+		if (airgapMode) {
+			normalModeTools = withoutPlanStepDone(pi.getActiveTools());
+			pi.setActiveTools(getAirgapModeTools());
+		} else if (planModeEnabled) {
 			// Snapshot current tools before restricting, so we can restore them
 			// exactly when plan mode is disabled (preserves Hindsight tools, etc.).
 			// Filter out plan_step_done — not relevant in plan mode.

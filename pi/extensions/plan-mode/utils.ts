@@ -54,6 +54,12 @@ const DESTRUCTIVE_PATTERNS = [
 	/\bexec\b/i,
 	/\bxargs\b/i,
 	/-exec\b/i,
+	/-execdir\b/i,
+	/-delete\b/i,
+	/-ok(dir)?\b/i,
+	/-fprintf?\b/i,
+	/-fprint0\b/i,
+	/-fls\b/i,
 	/\$\(/, // $(...) command substitution
 	/`/, // backtick command substitution
 	/\bperl\b/i,
@@ -118,6 +124,39 @@ export function isSafeCommand(command: string): boolean {
 	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
 	const isSafe = SAFE_PATTERNS.some((p) => p.test(command));
 	return !isDestructive && isSafe;
+}
+
+// Airgap mode: a *tiny* read-only core. Intentionally much smaller than
+// SAFE_PATTERNS. A command must match one of these AND survive every
+// DESTRUCTIVE_PATTERNS check (network, substitution, redirect, find write-flags).
+const AIRGAP_SAFE_PATTERNS = [
+	/^\s*cat\b/,
+	/^\s*grep\b/,
+	/^\s*ls\b/,
+	/^\s*find\b/,
+	/^\s*head\b/,
+	/^\s*tail\b/,
+	/^\s*wc\b/,
+	/^\s*pwd\b/,
+];
+
+export function isAirgapSafeCommand(command: string): boolean {
+	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
+	const isSafe = AIRGAP_SAFE_PATTERNS.some((p) => p.test(command));
+	return !isDestructive && isSafe;
+}
+
+/**
+ * Human-readable reason a command is blocked in airgap mode.
+ * Returns null if the command is actually safe. Reuses the specific reasons
+ * from blockReason for network/substitution/etc., then falls through to the
+ * airgap-specific message.
+ */
+export function airgapBlockReason(command: string): string | null {
+	if (isAirgapSafeCommand(command)) return null;
+	const shared = blockReason(command);
+	if (shared && shared !== "command not on the read-only allowlist") return shared;
+	return "airgap mode allows only: cat, grep, ls, find, head, tail, wc, pwd (local read-only)";
 }
 
 /**

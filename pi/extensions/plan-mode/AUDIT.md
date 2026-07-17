@@ -302,10 +302,10 @@ Matches upstream's `PLAN_MODE_DISABLED_TOOLS` approach.
   configured against a *remote* server, that is a network/mutation path that the
   bash allowlist (which only guards shell commands) does NOT cover — so plan
   mode is no longer strictly "local read-only" for memory. Accepted per explicit
-  request ("we need hindsight memory tools during plan mode"). If a defensible
-  no-egress posture is later needed on a sensitive deal repo, restrict plan mode
-  to read-only Hindsight tools by name (recall/list/get/reflect) or use
-  `--plan-airgap` (deferred item A) — do NOT silently re-broaden.
+  request ("we need hindsight memory tools during plan mode"). For a defensible
+  no-egress posture on a sensitive deal repo, use `--plan-airgap` (see Feature
+  addition below) — it strips ALL injected tools (including Hindsight) and
+  restricts bash to a tiny read-only core. Do NOT silently re-broaden.
 
   The `before_agent_start` plan-mode prompt wording was updated to match: "other
   active tools remain available (… memory tools)" instead of the old "you can
@@ -466,19 +466,74 @@ files. All fixes are in `index.ts`.
    `wasAlreadyDone` before calling `persistState()`, avoiding double-persist
    when the model re-marks an already-completed step.
 
+## Feature addition: `--plan-airgap` mode (2026-07-17)
+
+Implements deferred item A. Airgap is a **modifier on plan mode**, not a
+parallel mode: `airgapMode === true` implies `planModeEnabled === true`. It
+reuses all existing plan-mode machinery (bash blocking hook, plan extraction,
+execute/refine flow, compaction re-anchoring, session resume) and tightens two
+things:
+
+1. **Tool set:** a **fixed closed whitelist** (`AIRGAP_MODE_TOOLS` = `read`,
+   `grep`, `find`, `ls`, `questionnaire`, `bash`). Unlike `getPlanModeTools()`
+   which *unions* with active tools (preserving injected tools like Hindsight),
+   `getAirgapModeTools()` returns a **fixed list and ignores the active set**.
+   This is the inversion that closes the Hindsight-egress gap: every
+   non-baseline tool (all `hindsight_*`) is stripped, since even a
+   `hindsight_recall` query is data leaving the machine.
+
+2. **Bash allowlist:** a tiny read-only core (`cat`, `grep`, `ls`, `find`,
+   `head`, `tail`, `wc`, `pwd`) via `AIRGAP_SAFE_PATTERNS` + `airgapBlockReason()`,
+   much smaller than the broad `SAFE_PATTERNS` used in normal plan mode.
+
+### Tool policy summary
+
+| Tool | `--plan` | `--plan-airgap` |
+|---|---|---|
+| `read` | ✅ | ✅ |
+| `grep` / `find` / `ls` | ✅ | ✅ |
+| `questionnaire` | ✅ | ✅ |
+| `bash` | ✅ broad read-only allowlist | ✅ **tiny core only** |
+| `edit` / `write` | ❌ | ❌ |
+| Hindsight / injected tools | ✅ **preserved** | ❌ **stripped** |
+
+### Entry points
+- `--plan-airgap` CLI flag (airgap wins if both `--plan` and `--plan-airgap` are passed)
+- `/plan-airgap` command
+- `Ctrl+Alt+A` shortcut
+
+### Mode interaction (D2)
+Plan and airgap are **mutually exclusive, last wins**: entering `/plan` clears
+airgap; entering `/plan-airgap` clears plan. You can upgrade from plan to
+airgap mid-session via `/plan-airgap` (D3).
+
+### Scope boundary (IMPORTANT)
+The no-exfiltration guarantee holds **only while in airgap plan mode**.
+Executing a plan restores full tools (edit/write/network/memory). An explicit
+confirmation prompt appears on execute-from-airgap so the transition is
+guarded.
+
+### Pre-existing `find` write-flags gap (also hardened in normal `--plan`)
+While writing the airgap spec, found that `DESTRUCTIVE_PATTERNS` blocked
+`-exec` but NOT `-delete`, `-execdir`, `-ok`, `-okdir`, `-fprintf`, `-fprint`,
+`-fprint0`, `-fls`. So `find . -delete` or `find . -fprintf /tmp/out …` passed
+the read-only allowlist. Added all missing patterns to `DESTRUCTIVE_PATTERNS`
+— this hardens both normal `--plan` and `--plan-airgap`.
+
+### Open decisions resolved
+- **D1:** Bash core = `cat grep ls find` + `head tail wc pwd` (all read-only,
+  zero egress/mutation risk).
+- **D2:** Mutually exclusive, last wins.
+- **D3:** Yes, upgrade from plan to airgap mid-session (free via toggle).
+- **D4:** `Ctrl+Alt+A` shortcut registered.
+- **D5:** Deferred — all Hindsight tools stripped in airgap, always. "No egress"
+  means no egress, period. Can revisit if local-Hindsight detection is needed.
+
 ## Deferred / push-further items (NOT built — build only on the stated trigger)
 
 These were considered and intentionally deferred to avoid speculative
 over-engineering. Each has a trigger condition; build it when (and only when)
 that pain actually shows up.
-
-### A. `--plan-airgap` mode (no network, minimal bash)
-A stricter mode than `--plan`: strips bash to a tiny core (`cat grep ls find`
-only), zero network, for a defensible "this session could not have exfiltrated
-anything" posture — lighter than a container.
-- **Trigger:** you need to run plan mode on a specific sensitive deal repo and
-  want a no-exfiltration guarantee without spinning up containerization.
-- **Effort:** small (a second tool allowlist + flag).
 
 ### B. Plan → subagent delegation
 Plan mode produces numbered steps; each step is dispatched to a fresh subagent
