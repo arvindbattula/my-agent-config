@@ -503,9 +503,17 @@ things:
 - `Ctrl+Alt+A` shortcut
 
 ### Mode interaction (D2)
-Plan and airgap are **mutually exclusive, last wins**: entering `/plan` clears
-airgap; entering `/plan-airgap` clears plan. You can upgrade from plan to
-airgap mid-session via `/plan-airgap` (D3).
+Plan and airgap are **mutually exclusive, last wins**. The transition paths are:
+- `/plan` from normal → enters plain plan mode.
+- `/plan-airgap` from normal → enters airgap mode (snapshots full tool set).
+- `/plan-airgap` from plan → **upgrades** to airgap (preserves the existing
+  `normalModeTools` snapshot — does NOT re-snapshot the restricted plan set).
+- `/plan` from airgap → **downgrades** to plain plan mode (restores memory tools,
+  keeps bash read-only). Does NOT exit to normal mode.
+- `/plan` or `/plan-airgap` from the same mode → exits to normal mode (toggle off).
+
+This means `/plan` from airgap loosens restrictions rather than exiting, which
+matches the upgrade/downgrade intent of D3.
 
 ### Scope boundary (IMPORTANT)
 The no-exfiltration guarantee holds **only while in airgap plan mode**.

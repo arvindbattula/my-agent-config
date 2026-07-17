@@ -229,7 +229,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			const completed = todoItems.filter((t) => t.completed).length;
 			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", `📋 ${completed}/${todoItems.length}`));
 		} else if (airgapMode) {
-			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("error", "🔒 airgap"));
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", "🔒 airgap"));
 		} else if (planModeEnabled) {
 			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", "⏸ plan"));
 		} else {
@@ -253,8 +253,23 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	}
 
 	function togglePlanMode(ctx: ExtensionContext): void {
+		// If airgap is on, /plan downgrades to plain plan mode (not exit to normal).
+		// D2: modes are mutually exclusive — this is the "last wins" downgrade path.
+		if (airgapMode) {
+			airgapMode = false;
+			planModeEnabled = true; // stay in plan, just loosen restrictions
+			executionMode = false;
+			todoItems = [];
+			lastBlockedCommand = null;
+			// normalModeTools holds the full snapshot from when airgap was entered.
+			// Switch to the broader plan-mode tool set (preserves injected tools).
+			pi.setActiveTools(getPlanModeTools(normalModeTools ?? withoutPlanStepDone(pi.getActiveTools())));
+			ctx.ui.notify("Switched from airgap to plan mode. Memory tools restored; bash still read-only.");
+			updateStatus(ctx);
+			return;
+		}
+
 		planModeEnabled = !planModeEnabled;
-		airgapMode = false; // D2: entering plain plan clears airgap (mutually exclusive)
 		executionMode = false;
 		todoItems = [];
 		lastBlockedCommand = null;
@@ -284,8 +299,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		lastBlockedCommand = null;
 
 		if (turningOn) {
-			// Snapshot the FULL current tool set so exit restores injected tools too.
-			normalModeTools = withoutPlanStepDone(pi.getActiveTools());
+			// Only snapshot when entering from a full-access state (not already in
+			// plan mode). If already in plan mode, normalModeTools already holds the
+			// correct full-access snapshot from when plan was entered — don't
+			// overwrite it with the restricted plan-mode set.
+			if (!planModeEnabled) {
+				normalModeTools = withoutPlanStepDone(pi.getActiveTools());
+			}
 			airgapMode = true;
 			planModeEnabled = true; // airgap ⊂ plan
 			pi.setActiveTools(getAirgapModeTools());
