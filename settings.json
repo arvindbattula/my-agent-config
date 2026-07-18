@@ -56,11 +56,17 @@
   },
   "enabledPlugins": {
     "document-skills@anthropic-agent-skills": true,
-    "typescript-lsp@claude-plugins-official": true
+    "typescript-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "jdtls-lsp@claude-plugins-official": true
   },
   "alwaysThinkingEnabled": true,
   "effortLevel": "high",
   "autoUpdatesChannel": "stable",
   "skipAutoPermissionPrompt": true,
-  "theme": "light"
+  "skipWorkflowUsageWarning": true,
+  "theme": "light",
+  "model": "sonnet"
 }

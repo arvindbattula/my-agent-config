@@ -7,6 +7,12 @@ rules/pi-coding-agent.md
 # Pi extension — runtime cache, auto-generated from live Azure ARM discovery
 pi/extensions/azure-foundry-models.json
 
+# Pi extension — machine-specific shim for Valar proxy (local only)
+pi/extensions/valar-strip-reasoning.ts
+
+# Rule — machine-specific URL scheme allowlist (local only)
+rules/url-scheme-allowlist.md
+
 # Pi Hindsight extension — per-machine, per-session memory state (regenerates)
 .pi/
 

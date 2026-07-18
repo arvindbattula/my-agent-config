@@ -245,3 +245,4 @@ Tell the user:
 - **Celebrate what worked.** Positive patterns are as valuable as blind spots. They prevent regression — knowing what to KEEP doing is as important as knowing what to fix.
 - **Performance notes are for signal, not logging.** Don't record every observation. Record the ones that would change how a skill behaves next time.
 - **Promotions require evidence.** Never promote a performance note into a skill's instructions until it has evidence from 3+ projects. One project is an anecdote. Three is a pattern.
+- 2026-07-17 [jobscout]: Add 'read the production/CI logs since the last retro' to the retro prerequisites — a log sweep found the costliest inefficiency (nightly re-judging, 457/461 overlap) and a recovered live job lead, neither visible in docs/ or git log. (evidence: jobscout scout-run logs 29360942677..29541077400)
