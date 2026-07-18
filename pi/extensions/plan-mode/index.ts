@@ -733,12 +733,16 @@ Tip: For git commits with special characters in the message, use git commit -F <
 			pi.appendEntry("plan-mode-execute", { reanchored: true });
 		}
 
-		// RC4 fix: for manual compaction during execution, send a continuation
-		// message with the current plan state so the model can auto-resume
-		// without the user having to say "continue". For threshold compaction,
-		// the run continues and before_agent_start will re-inject context on the
-		// next turn. For overflow+willRetry, the retry handles it (see AUDIT.md).
-		if (executing && event.reason === "manual") {
+		// RC4 fix: send a continuation message with the current plan state for
+		// manual, threshold, AND non-retrying overflow compaction. Without this,
+		// threshold compaction stops the session (no queued messages) and the
+		// user must manually type "continue." The overflow+willRetry path is
+		// already handled by Pi's built-in compact-and-retry.
+		if (executing && (
+			event.reason === "manual" ||
+			event.reason === "threshold" ||
+			(event.reason === "overflow" && !event.willRetry)
+		)) {
 			const completed = todoItems.filter((t) => t.completed).length;
 			const remaining = todoItems.filter((t) => !t.completed);
 			const todoList = remaining.map((t) => `${t.step}. ${t.rawText ?? t.text}`).join("\n");
