@@ -30,6 +30,11 @@
             "type": "command",
             "command": "bash ~/.claude/hooks/protect-paths.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/design-antipattern-prevent.sh",
+            "timeout": 5
           }
         ]
       },
