@@ -13,10 +13,15 @@ set -uo pipefail
 INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+STOP_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
 
 if [ -z "$CWD" ]; then
   CWD="$(pwd)"
 fi
+
+# Safety valve: if stop_hook_active is true, the agent already got one
+# nudge and retried. Let it stop to avoid an infinite loop.
+[ "$STOP_ACTIVE" = "true" ] && exit 0
 
 GATE_FILE="$CWD/.hook-state/last_design_gate.json"
 

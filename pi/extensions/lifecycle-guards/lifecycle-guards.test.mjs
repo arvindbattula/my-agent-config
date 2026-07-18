@@ -3,7 +3,7 @@
 // Tests the ported logic from Claude Code bash hooks:
 // - isProtectedPath (protect-paths.sh)
 // - checkCommand (command-policy.sh)
-// - checkDesignPatterns (design-antipattern-check.sh)
+// - checkDesignPatterns (design-antipattern-check.sh + design-antipattern-prevent.sh)
 // - compressFileContent + validateCompression (compress-memory.sh)
 // - isFrontendFile, isMemoryFile (file classification guards)
 //

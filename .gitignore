@@ -19,6 +19,9 @@ rules/url-scheme-allowlist.md
 # Plan-mode extension — auto-generated auditable plan artifacts
 PLAN-*.md
 
+# Session working docs (ephemeral, not permanent artifacts)
+docs/
+
 # Lifecycle hooks — runtime state and audit logs (per-project, regenerates)
 .hook-state/
 reports/

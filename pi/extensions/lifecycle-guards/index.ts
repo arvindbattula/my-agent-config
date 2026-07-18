@@ -6,6 +6,7 @@
  *
  * - session_start + before_agent_start → session context (session-start.sh)
  * - tool_call (write/edit) → protected paths (protect-paths.sh)
+ * - tool_call (write/edit) → design antipattern prevention (design-antipattern-prevent.sh)
  * - tool_call (bash) → command policy (command-policy.sh)
  * - tool_result (write) → memory compression (compress-memory.sh)
  * - tool_result (write/edit) → design antipattern check + gate state (design-antipattern-check.sh)
@@ -82,6 +83,27 @@ export default function lifecycleGuardsExtension(pi: ExtensionAPI): void {
 					block: true,
 					reason: result.reason,
 				};
+			}
+
+			// Design antipattern prevention: block bad patterns before they hit disk
+			// (ports design-antipattern-prevent.sh). The PostToolUse check + agent_end
+			// gate remain as a backstop for patterns introduced by partial edits.
+			if (isFrontendFile(filePath)) {
+				const writeInput = event.input as { content?: string; new_string?: string };
+				const content = writeInput.content ?? writeInput.new_string;
+				if (content) {
+					const warnings = checkDesignPatterns(content);
+					if (warnings.length > 0) {
+						const reason = `${warnings.join("\n")}\nBLOCKED: Fix the design anti-patterns above before writing this file.`;
+						if (ctx.hasUI) {
+							ctx.ui.notify(`⏸ Design: ${warnings.length} anti-pattern(s) blocked in ${filePath}`, "warning");
+						}
+						return {
+							block: true,
+							reason,
+						};
+					}
+				}
 			}
 		}
 

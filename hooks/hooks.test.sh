@@ -110,6 +110,47 @@ printf '%s\n' "$BAD" > "$PROJ/one.css"; design "$PROJ/one.css" "$SID_A"
 stop "$SID_A"; expect_exit "stop blocks in owning session" 2
 stop "$SID_B"; expect_exit "stop ignores stale gate from other session" 0
 
+# 5. stop_hook_active=true lets agent stop despite failing gate (anti-loop)
+stop_active() { # <session_id>
+  run_hook stop-gate.sh "$(printf '{"stop_hook_active":true,"cwd":%s,"session_id":%s}' "$(json "$PROJ")" "$(json "$1")")"
+}
+# Re-create a failing file (test 4 may have left gate in SID_A)
+printf '%s\n' "$BAD" > "$PROJ/one.css"; design "$PROJ/one.css" "$SID_A"
+stop "$SID_A"; expect_exit "stop blocks first time (stop_hook_active=false)" 2
+stop_active "$SID_A"; expect_exit "stop_hook_active=true releases despite failing gate" 0
+
+# ── design-antipattern-prevent.sh (PreToolUse) ────────────────────────────
+echo "design-antipattern-prevent.sh"
+prevent() { # <file_path> <content>
+  run_hook design-antipattern-prevent.sh \
+    "$(printf '{"tool_input":{"file_path":%s,"content":%s}}' "$(json "$1")" "$(json "$2")")"
+}
+prevent_edit() { # <file_path> <new_string>
+  run_hook design-antipattern-prevent.sh \
+    "$(printf '{"tool_input":{"file_path":%s,"new_string":%s}}' "$(json "$1")" "$(json "$2")")"
+}
+
+prevent "src/app.ts" "export const x = 1;"
+expect_exit "allow non-frontend file (ts)" 0
+
+prevent "src/app.css" ".a { color: oklch(0.2 0.02 250); font-family: \"Space Grotesk\"; }"
+expect_exit "allow clean CSS" 0
+
+prevent "src/app.css" ".a { color: #000; font-family: Inter; }"
+expect_exit "block #000 + Inter in CSS" 2
+
+prevent "src/app.tsx" "<div style={{ background: 'linear-gradient(135deg, violet, indigo)' }}>"
+expect_exit "block purple gradient in TSX" 2
+
+prevent "src/app.tsx" "<input type='text' />"
+expect_exit "allow non-design content in TSX" 0
+
+prevent_edit "src/app.css" ".a { color: hsl(200 50% 50%); }"
+expect_exit "block HSL in Edit new_string" 2
+
+prevent_edit "src/app.css" ".a { color: oklch(0.5 0.1 200); }"
+expect_exit "allow OKLCH in Edit new_string" 0
+
 # ── session-end.sh ────────────────────────────────────────────────────────
 echo "session-end.sh"
 run_hook session-end.sh "$(printf '{"session_id":"abc","reason":"quit","cwd":%s}' "$(json "$PROJ")")"

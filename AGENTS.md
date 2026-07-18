@@ -21,7 +21,7 @@ Personal agent configuration — skills, commands, rules, and settings, synced a
 | `commands/` | Claude Code, Codex | user-invoked via `/`; pi has no command concept |
 | `rules/` | Claude Code | always-on behavioral guidelines |
 | `rules-personal/` | local only | machine-local rule staging; gitignored, not committed |
-| `hooks/` | Claude Code | session lifecycle: session-start, compress-memory, design-antipattern-check, protect-paths, command-policy, stop-gate, session-end |
+| `hooks/` | Claude Code | session lifecycle: session-start, compress-memory, design-antipattern-check, design-antipattern-prevent (PreToolUse guard), protect-paths, command-policy, stop-gate (with stop_hook_active safety), session-end |
 | `bin/` | Claude Code | helper scripts (e.g. `recall`) |
 | `pi/extensions/` | pi | auto-discovered from `~/.pi/agent/extensions`; includes lifecycle-guards (Pi port of Claude Code hooks) |
 | `settings.json` | Claude Code | permissions, plugins, preferences |
