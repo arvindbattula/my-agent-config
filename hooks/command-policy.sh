@@ -21,10 +21,10 @@ NORMALIZED=$(echo "$COMMAND" | tr -s ' \t' ' ')
 BLOCKED=""
 
 # --- Destructive recursive deletes ---
-# Bare root/home/cwd: rm -rf /, ~, $HOME, . (but not /foo, ./sub, build/)
+# Bare root/home/cwd: rm -rf /, ~, $HOME, . and ./ (but not /foo, ./sub, build/)
 # Parent traversal: rm -rf .. , ../ , ../foo , ../.. (kept in parity with the
 # Pi lifecycle-guards util). ./sub and build/ stay allowed for artifact cleanup.
-if echo "$NORMALIZED" | grep -qE '\brm\s+-rf\s+((/|~|\$HOME|\.)(\s|$)|\.\.(/|\s|$))' 2>/dev/null; then
+if echo "$NORMALIZED" | grep -qE '\brm\s+-rf\s+((/|~|\$HOME)(\s|$)|\./?(\s|$)|\.\.(/|\s|$))' 2>/dev/null; then
   BLOCKED="destructive recursive delete (rm -rf root/home/cwd/parent)"
 fi
 

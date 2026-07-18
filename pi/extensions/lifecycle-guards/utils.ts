@@ -34,7 +34,7 @@ export function isProtectedPath(filePath: string, cwd: string): PathCheckResult 
 	// Expand ~ to home
 	let resolved = filePath;
 	if (resolved.startsWith("~")) {
-		resolved = resolved.replace(/^~/, Deno?.env?.get("HOME") ?? process.env.HOME ?? "~");
+		resolved = resolved.replace(/^~/, process.env.HOME ?? "~");
 	}
 
 	// Make absolute
@@ -124,11 +124,13 @@ interface DenyPattern {
 }
 
 const COMMAND_DENY_PATTERNS: DenyPattern[] = [
-	// Destructive recursive deletes (root, home, cwd)
+	// Destructive recursive deletes (root, home, cwd, parent).
+	// The cwd rule matches both `.` and `./` (equally destructive) but still
+	// allows `./subdir` for artifact cleanup.
 	{ pattern: /\brm\s+-rf\s+\/(\s|$)/, reason: "destructive recursive delete (rm -rf root)" },
 	{ pattern: /\brm\s+-rf\s+~(\s|$)/, reason: "destructive recursive delete (rm -rf home)" },
 	{ pattern: /\brm\s+-rf\s+\$HOME(\s|$)/, reason: "destructive recursive delete (rm -rf home)" },
-	{ pattern: /\brm\s+-rf\s+\.(\s|$)/, reason: "destructive recursive delete (rm -rf cwd)" },
+	{ pattern: /\brm\s+-rf\s+\.\/?(\s|$)/, reason: "destructive recursive delete (rm -rf cwd)" },
 	{ pattern: /\brm\s+-rf\s+\.\.(\/|\s|$)/, reason: "destructive recursive delete (rm -rf parent)" },
 	// Destructive database commands
 	{ pattern: /\b(drop|truncate)\s+table\b/i, reason: "destructive database command (DROP/TRUNCATE TABLE)" },
@@ -216,11 +218,13 @@ export function isFrontendFile(filePath: string): boolean {
 
 /** Check if a file path is a memory file worth compressing. */
 export function isMemoryFile(filePath: string): boolean {
-	// Must be in a memory/ directory and be a .md file
-	if (!filePath.includes("/memory/") || !filePath.endsWith(".md")) return false;
+	// Normalize Windows separators, then require a `.md` under a memory/ segment.
+	// Matches both absolute (/project/memory/x.md) and relative (memory/x.md) paths.
+	const normalized = filePath.replace(/\\/g, "/");
+	if (!normalized.endsWith(".md")) return false;
 	// Exclude the MEMORY.md index
-	if (filePath.endsWith("/MEMORY.md")) return false;
-	return true;
+	if (normalized === "MEMORY.md" || normalized.endsWith("/MEMORY.md")) return false;
+	return /(^|\/)memory\//.test(normalized);
 }
 
 // ─── Memory compression ───────────────────────────────────────────────────

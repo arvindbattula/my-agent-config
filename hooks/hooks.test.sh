@@ -56,6 +56,7 @@ cp_run "rm -rf /";                    expect_exit "block rm -rf /" 2
 cp_run "rm -rf ~";                    expect_exit "block rm -rf ~" 2
 cp_run 'rm -rf $HOME';                expect_exit "block rm -rf \$HOME" 2
 cp_run "rm -rf .";                    expect_exit "block rm -rf . (cwd)" 2
+cp_run "rm -rf ./";                   expect_exit "block rm -rf ./ (cwd)" 2
 cp_run "rm -rf ..";                   expect_exit "block rm -rf .. (parent)" 2
 cp_run "rm -rf ../..";                expect_exit "block rm -rf ../.." 2
 cp_run "rm -rf ../sibling";           expect_exit "block rm -rf ../sibling" 2
@@ -66,6 +67,7 @@ cp_run "git push --force origin main";expect_exit "block force-push main" 2
 cp_run "git push -f origin master";   expect_exit "block -f push master" 2
 cp_run "rm -rf build/";               expect_exit "allow rm -rf build/" 0
 cp_run "rm -rf ./node_modules";       expect_exit "allow rm -rf ./node_modules" 0
+cp_run "rm -rf ./dist";               expect_exit "allow rm -rf ./dist" 0
 cp_run "cat README.md";               expect_exit "allow cat README.md" 0
 cp_run "git push origin feature";     expect_exit "allow push to feature" 0
 

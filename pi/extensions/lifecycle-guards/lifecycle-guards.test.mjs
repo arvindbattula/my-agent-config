@@ -333,6 +333,9 @@ test("isFrontendFile: .py is not frontend", () => {
 
 test("isMemoryFile: memory/*.md is a memory file", () => {
 	assert.equal(isMemoryFile("/project/memory/notes.md"), true);
+	// Relative paths (no leading slash) must also match
+	assert.equal(isMemoryFile("memory/notes.md"), true);
+	assert.equal(isMemoryFile("memory/sub/notes.md"), true);
 });
 
 test("isMemoryFile: MEMORY.md index is excluded", () => {
