@@ -54,4 +54,6 @@ check_design_patterns() {
     if [[ -n "$warnings" ]]; then
         echo -e "$warnings" | sed '/^$/d'
     fi
+
+    return 0
 }

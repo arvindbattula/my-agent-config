@@ -782,8 +782,8 @@ sync_pi() {
 sync_pi_extensions
 
 # ─── Pi config files (~/.pi/agent/{models,settings}.json) ───
-# Sync repo pi/models.json and pi/settings.json to ~/.pi/agent/.
-# Repo is the source of truth. Uses the same r/l/d/s flow as other files.
+# Sync repo pi/models.json and pi/settings.json with ~/.pi/agent/.
+# Supports bidirectional sync (same r/l/d/s flow as other config files).
 sync_pi_config() {
     [ -d "$HOME/.pi/agent" ] || return 0
 
@@ -825,15 +825,35 @@ sync_pi_config() {
                             ((actions_taken++))
                         fi
                         echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
-                        ((local_newer++))
                     elif [ "$action" = "local" ]; then
                         if ! $DRY_RUN; then
                             cp "$local_file" "$repo_file"
                             ((actions_taken++))
                         fi
-                        echo -e "    ${BLUE}↑ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
-                        ((local_newer++))
+                        echo -e "    ${GREEN}→ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
+                    elif [ "$action" = "diff" ]; then
+                        diff "$repo_file" "$local_file" || true
+                        read -p "    Use [r]epo / keep [l]ocal / [s]kip? " choice2
+                        case "$choice2" in
+                            r|R)
+                                if ! $DRY_RUN; then
+                                    backup_file "$local_file"
+                                    cp "$repo_file" "$local_file"
+                                    ((actions_taken++))
+                                fi
+                                echo -e "    ${GREEN}→ copied repo to local${NC}"
+                                ;;
+                            l|L)
+                                if ! $DRY_RUN; then
+                                    cp "$local_file" "$repo_file"
+                                    ((actions_taken++))
+                                fi
+                                echo -e "    ${GREEN}→ copied local to repo${NC}"
+                                ;;
+                            *) echo -e "    ${GRAY}→ skipped${NC}" ;;
+                        esac
                     fi
+                    ((local_newer++))
                 fi
                 ;;
             repo_only)
