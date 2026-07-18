@@ -781,6 +781,93 @@ sync_pi() {
 
 sync_pi_extensions
 
+# ─── Pi config files (~/.pi/agent/{models,settings}.json) ───
+# Sync repo pi/models.json and pi/settings.json to ~/.pi/agent/.
+# Repo is the source of truth. Uses the same r/l/d/s flow as other files.
+sync_pi_config() {
+    [ -d "$HOME/.pi/agent" ] || return 0
+
+    print_header "Pi Config"
+    mkdir -p "$HOME/.pi/agent"
+
+    sync_pi_config_file() {
+        local name="$1"
+        local repo_file="$REPO_DIR/pi/$name"
+        local local_file="$HOME/.pi/agent/$name"
+
+        [ -f "$repo_file" ] || return 0
+
+        local status=$(compare_file "$repo_file" "$local_file")
+
+        case "$status" in
+            identical)
+                echo -e "  ${GREEN}✓${NC} $name"
+                ((identical++))
+                ;;
+            differs)
+                if $STATUS_ONLY; then
+                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}(differs)${NC}"
+                    ((local_newer++))
+                elif $FORCE; then
+                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}→ copied repo to local${NC}"
+                    if ! $DRY_RUN; then
+                        backup_file "$local_file"
+                        cp "$repo_file" "$local_file"
+                        ((actions_taken++))
+                    fi
+                    ((local_newer++))
+                else
+                    action=$(ask_action "$name" "differs")
+                    if [ "$action" = "repo" ]; then
+                        if ! $DRY_RUN; then
+                            backup_file "$local_file"
+                            cp "$repo_file" "$local_file"
+                            ((actions_taken++))
+                        fi
+                        echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
+                        ((local_newer++))
+                    elif [ "$action" = "local" ]; then
+                        if ! $DRY_RUN; then
+                            cp "$local_file" "$repo_file"
+                            ((actions_taken++))
+                        fi
+                        echo -e "    ${BLUE}↑ copied local to repo${NC}$($DRY_RUN && echo " (dry-run)")"
+                        ((local_newer++))
+                    fi
+                fi
+                ;;
+            repo_only)
+                echo -e "  ${BLUE}↓${NC} $name ${GRAY}→ copied repo to local${NC}"
+                if ! $DRY_RUN; then
+                    cp "$repo_file" "$local_file"
+                    ((actions_taken++))
+                fi
+                ((repo_only++))
+                ;;
+            local_only)
+                echo -e "  ${CYAN}+${NC} $name ${GRAY}(local only)${NC}"
+                if $STATUS_ONLY; then
+                    ((local_only++))
+                elif $DRY_RUN; then
+                    echo -e "    ${GRAY}→ would copy local to repo${NC}"
+                    ((local_only++))
+                else
+                    cp "$local_file" "$repo_file"
+                    echo -e "    ${BLUE}↑ copied local to repo${NC}"
+                    ((local_only++))
+                fi
+                ;;
+        esac
+    }
+
+    sync_pi_config_file "models.json"
+    sync_pi_config_file "settings.json"
+
+    return 0
+}
+
+sync_pi_config
+
 sync_pi
 pi_status=$?
 

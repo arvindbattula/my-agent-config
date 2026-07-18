@@ -1,0 +1,21 @@
+{
+  "theme": "light",
+  "extensions": [
+    "~/.pi/agent/extensions/azure-foundry.ts",
+    "~/.pi/agent/extensions/azure-openai-models.ts"
+  ],
+  "lastChangelogVersion": "0.80.10",
+  "defaultProvider": "valar",
+  "defaultModel": "zai-org/GLM-5.2",
+  "hideThinkingBlock": false,
+  "defaultThinkingLevel": "high",
+  "retry": {
+    "enabled": false
+  },
+  "compaction": {
+    "reserveTokens": 32768
+  },
+  "packages": [
+    "npm:@luxusai/pi-hindsight"
+  ]
+}
