@@ -250,4 +250,4 @@ Tell the user:
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
 <!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->
-- 2026-07-17 [jobscout]: Add 'read the production/CI logs since the last retro' to the retro prerequisites — a log sweep found the costliest inefficiency (nightly re-judging, 457/461 overlap) and a recovered live job lead, neither visible in docs/ or git log. (evidence: jobscout scout-run logs 29360942677..29541077400)
+- 2026-07-17 [Project C]: Add 'read the production/CI logs since the last retro' to the retro prerequisites — a log sweep found the costliest inefficiency (recurring job overlap) and a recovered opportunity, neither visible in docs/ or git log. (evidence: project CI logs)

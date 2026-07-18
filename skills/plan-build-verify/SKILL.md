@@ -89,4 +89,4 @@ Persistence rule: durable project knowledge lives **only** in `docs/`. Never cre
 ## Performance Notes
 <!-- Updated by /retro. Do not edit manually. -->
 <!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->
-- 2026-05-18 [innovate-intel]: AskUserQuestion at two real decision forks (backfill mechanism for issue #7, on-refuse action for `canonicalize_topic` in issue #8) elicited correct user direction in one round each. Without it, the defaults I would have picked would have committed wrong-direction work. Use AskUserQuestion proactively for forks where alternatives have different cost/scope or different reversibility, not just for raw ambiguity (evidence: both forks resulted in approved option with no rework needed)
+- 2026-05-18 [Project A]: AskUserQuestion at two real decision forks elicited correct user direction in one round each. Without it, the defaults would have committed wrong-direction work. Use AskUserQuestion proactively for forks where alternatives have different cost/scope or different reversibility, not just for raw ambiguity (evidence: both forks resulted in approved option with no rework needed)
