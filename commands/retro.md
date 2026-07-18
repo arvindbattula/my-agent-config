@@ -15,6 +15,7 @@ Read whichever of these exist (none are strictly required):
 - `CLAUDE.md` — project context
 
 Also read the codebase to understand what was actually built.
+Also read production/CI logs since the last retro — a log sweep often surfaces the costliest inefficiencies and real-world issues invisible in docs/ or git log.
 
 Step 1 adapts to what's available:
 - If `docs/spec.md` exists → run Step 1a (full Spec vs. Reality audit).
@@ -245,3 +246,8 @@ Tell the user:
 - **Celebrate what worked.** Positive patterns are as valuable as blind spots. They prevent regression — knowing what to KEEP doing is as important as knowing what to fix.
 - **Performance notes are for signal, not logging.** Don't record every observation. Record the ones that would change how a skill behaves next time.
 - **Promotions require evidence.** Never promote a performance note into a skill's instructions until it has evidence from 3+ projects. One project is an anecdote. Three is a pattern.
+
+## Performance Notes
+<!-- Updated by /retro. Do not edit manually. -->
+<!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->
+- 2026-07-17 [Project C]: Add 'read the production/CI logs since the last retro' to the retro prerequisites — a log sweep found the costliest inefficiency (recurring job overlap) and a recovered opportunity, neither visible in docs/ or git log. (evidence: project CI logs)
