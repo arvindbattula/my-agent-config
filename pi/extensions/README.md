@@ -21,6 +21,25 @@ Anthropic-compatible provider for Claude models deployed through Azure AI Foundr
 
 Auth uses Entra ID via `az cli`.
 
+### `lifecycle-guards/`
+Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extension event system. Provides the same deterministic rules in both runtimes:
+
+- **Session context** (`before_agent_start`) — injects workflow reminder at session start.
+- **Protected paths** (`tool_call: write/edit`) — blocks edits to `.env`, `.git/`, `generated/`, and paths outside the project root.
+- **Command policy** (`tool_call: bash`) — blocks destructive shell commands (`rm -rf /`, `DROP TABLE`, `cat .env`, force-push to main/master).
+- **Memory compression** (`tool_result: write`) — compresses prose in `memory/*.md` files (removes filler words, replaces verbose phrases, preserves code/URLs/headings/frontmatter).
+- **Design antipattern check** (`tool_result: write/edit`) — detects AI-tell patterns in frontend files (pure black/white, HSL, purple gradients, Inter/Roboto fonts, side-stripe borders, gradient text). Tracks each failing file independently (fixing one file never masks another) and mirrors state to `.hook-state/last_design_gate.json` for observability.
+- **Completion gate** (`agent_end`) — queues a follow-up message while any frontend file still fails, with a circuit breaker (max 3 follow-ups) that re-arms when the failing set changes. State is in-memory, so it is scoped to the current session and can never carry a stale block into a fresh one.
+- **Audit record** (`session_shutdown`) — appends a JSONL line to `reports/session-audit.log`.
+
+**State files** (per-project, gitignored):
+- `.hook-state/last_design_gate.json`
+- `reports/session-audit.log`
+
+**Interaction with plan-mode:** Both extensions listen to `tool_call`. Plan-mode returns early when not in plan mode. When plan mode is active, both handlers run — if either blocks, the tool is blocked. The command policy here is a subset of plan-mode's restrictions, so plan-mode's stricter checks block first.
+
+**Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (56 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (35 assertions across all five hooks, including command-policy parity, per-file gate tracking, and cross-session staleness).
+
 ### `azure-openai-models.ts`
 OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed as serverless MaaS on Azure AI Foundry.
 
