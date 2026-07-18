@@ -582,15 +582,18 @@ sync_pi_extensions() {
     # helpers under subdirs like extensions/lib/ are synced. Pi only treats a
     # subdir as an extension if it has index.ts or a pi-manifest package.json, so
     # a plain lib/ subdir is ignored by pi but still importable by extensions.
+    # Include docs/config (.md/.json) alongside .ts so per-extension AUDIT.md and
+    # README.md stay in sync instead of silently drifting (they are not runtime
+    # code, but they are the audit trail for deliberate upstream divergences).
     local names=()
     while IFS= read -r f; do
         [ -n "$f" ] && names+=("${f#"$REPO_DIR"/pi/extensions/}")
-    done < <(find "$REPO_DIR/pi/extensions" -type f -name '*.ts')
+    done < <(find "$REPO_DIR/pi/extensions" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' \))
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         local n; n="${f#"$PI_EXTENSIONS"/}"
         [[ " ${names[*]:-} " =~ " $n " ]] || names+=("$n")
-    done < <(find "$PI_EXTENSIONS" -type f -name '*.ts')
+    done < <(find "$PI_EXTENSIONS" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' \))
 
     IFS=$'\n' names=($(sort <<<"${names[*]:-}")); unset IFS
 
