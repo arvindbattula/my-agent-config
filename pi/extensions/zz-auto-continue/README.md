@@ -38,13 +38,17 @@ for every non-retrying compaction.
 Extensions load in directory-name order:
 
 ```
-plan-mode/        ← loads first, handles plan-mode sessions
+plan-mode/        ← loads first, handles plan-mode execution sessions
 zz-auto-continue/ ← loads second, handles everything else
 ```
 
-In plan-mode sessions: `plan-mode` queues a plan-specific resume message first.
-`zz-auto-continue` sees `ctx.hasPendingMessages() === true` and skips. No
-double-queuing.
+In plan-mode **execution** sessions: `plan-mode` queues a plan-specific resume
+message first. `zz-auto-continue` sees `ctx.hasPendingMessages() === true` and
+skips. No double-queuing.
+
+In plan-mode **planning** sessions (not executing): `plan-mode` persists state
+but does NOT queue a resume message. `zz-auto-continue` handles the
+continuation (same as non-plan-mode sessions).
 
 In non-plan-mode sessions: `plan-mode` returns early (not enabled).
 `zz-auto-continue` handles it.
@@ -61,8 +65,10 @@ warning notification and must continue manually.
 
 - **Error-based overflow** (`reason="overflow", willRetry=true`): Pi already
   auto-retries. The extension skips to avoid a double-continue.
-- **Plan-mode sessions**: `plan-mode` already queues a plan-specific resume
-  message. `hasPendingMessages()` is true → this extension skips.
+- **Plan-mode execution sessions**: `plan-mode` already queues a plan-specific
+  resume message. `hasPendingMessages()` is true → this extension skips. (In
+  plan-mode *planning* sessions, plan-mode does NOT queue a resume, so this
+  extension handles it — same as non-plan-mode.)
 
 ## Settings
 

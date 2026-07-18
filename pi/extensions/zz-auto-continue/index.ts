@@ -7,9 +7,11 @@
  * compaction returns false from hasQueuedMessages() and the agent loop ends.
  *
  * The `zz-` prefix ensures this extension loads AFTER `plan-mode` (extensions
- * load in directory-name order). In plan-mode sessions, `plan-mode` queues a
- * plan-specific resume message first; this extension then sees
- * `ctx.hasPendingMessages() === true` and skips — no double-queuing.
+ * load in directory-name order). In plan-mode *execution* sessions, `plan-mode`
+ * queues a plan-specific resume message first; this extension then sees
+ * `ctx.hasPendingMessages() === true` and skips — no double-queuing. In
+ * plan-mode *planning* sessions (not executing), plan-mode persists state but
+ * does NOT queue a resume message, so this extension handles the continuation.
  *
  * Circuit breaker: max 5 auto-continues per user-initiated prompt, reset on
  * `before_agent_start`. Prevents infinite compaction→continue→tool-calls→
@@ -42,8 +44,10 @@ export default function autoContinueExtension(pi: ExtensionAPI): void {
 		}
 
 		// Skip if another extension already queued a continuation message. In
-		// plan-mode sessions, plan-mode loads first and queues a plan-specific
-		// resume message; hasPendingMessages() reflects that and we bow out.
+		// plan-mode *execution* sessions, plan-mode loads first and queues a
+		// plan-specific resume message; hasPendingMessages() reflects that and
+		// we bow out. In plan-mode *planning* sessions (not executing), plan-mode
+		// does NOT queue a resume, so we handle it here.
 		if (ctx.hasPendingMessages?.() === true) {
 			return;
 		}
