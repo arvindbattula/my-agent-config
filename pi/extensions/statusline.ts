@@ -8,7 +8,10 @@
  *   ████████░░ 42% (12k) | $0.34 | ⏱️ 3m 12s
  *
  * Data-source notes (flagged assumptions):
- * - Cost: summed from assistant message usage on the current branch.
+ * - Cost: summed from ALL session entries (assistant, toolResult, compaction,
+ *   branch_summary) via getEntries(), matching pi's built-in footer and
+ *   /stats. Previously scoped to getBranch() and assistant-only, which
+ *   undercounted after compaction and missed tool/summary usage.
  * - Context %/tokens: from ctx.getContextUsage() (Pi's own estimate).
  * - Duration: wall-clock since session_start. Pi does not expose a
  *   cumulative request-duration counter like Claude Code's
@@ -105,8 +108,12 @@ export default function (pi: ExtensionAPI) {
 		// refresh immediately (no cold-start flicker of missing branch stats).
 		let gitCache: { ts: number; stats: GitStats | null } = { ts: -Infinity, stats: null };
 		let gitInFlight = false;
-		// Memoize cost: getBranch() is O(n) and render() fires on every text delta.
-		// Recompute only when the branch entry count changes.
+		// Memoize cost: getEntries() is O(n) and render() fires on every text
+		// delta. Recompute only when the entry count changes. Aggregates over
+		// ALL session entries (assistant, toolResult, compaction, branch_summary)
+		// to match pi's built-in footer and /stats — not just assistant messages
+		// on the current branch, which undercounted after compaction and missed
+		// tool/summary usage.
 		let costCache = { entries: -1, total: 0 };
 
 		ctx.ui.setFooter(
@@ -147,16 +154,24 @@ export default function (pi: ExtensionAPI) {
 						}
 						const stats = gitCache.stats;
 
-						// Cost from assistant usage on the current branch (memoized).
-						const branchEntries = ctx.sessionManager.getBranch();
-						if (branchEntries.length !== costCache.entries) {
+						// Cost from ALL session entries (memoized). Mirrors pi's footer.js
+						// and getSessionStats(): assistant + toolResult messages, plus
+						// compaction and branch_summary entries. Using getEntries()
+						// (full session) not getBranch() (current path only) so cost
+						// survives compaction — getBranch() drops everything compacted away.
+						const allEntries = ctx.sessionManager.getEntries();
+						if (allEntries.length !== costCache.entries) {
 							let total = 0;
-							for (const entry of branchEntries) {
+							for (const entry of allEntries) {
 								if (entry.type === "message" && entry.message.role === "assistant") {
 									total += (entry.message as AssistantMessage).usage.cost.total;
+								} else if (entry.type === "message" && entry.message.role === "toolResult" && (entry.message as any).usage) {
+									total += (entry.message as any).usage.cost.total;
+								} else if ((entry.type === "compaction" || entry.type === "branch_summary") && (entry as any).usage) {
+									total += (entry as any).usage.cost.total;
 								}
 							}
-							costCache = { entries: branchEntries.length, total };
+							costCache = { entries: allEntries.length, total };
 						}
 						const cost = costCache.total;
 
