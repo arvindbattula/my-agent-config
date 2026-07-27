@@ -11,7 +11,7 @@ Shared Entra ID token acquisition utility used by both Azure extensions. Caches 
 Two-line status bar footer showing model, directory, git branch + diff stats, thinking level, context usage, tokens, cost, and session elapsed time.
 
 ### `azure-foundry.ts`
-Anthropic-compatible provider for Claude models deployed through Azure AI Foundry. Discovers models dynamically via ARM API at startup; falls back to a local cache when ARM is unreachable.
+Anthropic-compatible provider for Claude models deployed through Azure AI Foundry. Discovers models dynamically via ARM API using pi's `refreshModels` mechanism (not during startup); falls back to the provider-scoped model store when ARM is unreachable or `PI_OFFLINE=1` is set. The factory seeds from a legacy cache file for zero-network startup.
 
 **Requires these environment variables:**
 - `AZURE_FOUNDRY_BASE_URL` — Anthropic API endpoint
@@ -93,6 +93,6 @@ az login
 ## Design Notes
 
 - **No Azure identifiers in version control.** All subscription IDs, resource group names, account names, and endpoint URLs are configured via environment variables. Nothing sensitive is committed.
-- **Cache files stay local.** `azure-foundry-models.json` is a runtime artifact generated from live ARM discovery. It is gitignored and never committed.
+- **Model store via context.store.** `refreshModels` uses pi's provider-scoped model store (`context.store`) for persistence, not a bespoke cache file. The legacy `azure-foundry-models.json` is read once as a seed at startup; new writes go to `context.store`.
 - **Cost data is public list pricing.** Per-token rates are sourced from Anthropic's published pricing and are estimates only. Actual Azure contract rates may differ.
 - **Non-Claude models are statically defined.** Unlike Claude models (discovered dynamically via ARM API), DeepSeek/Kimi models in `azure-openai-models.ts` are defined in a static `MODELS` array. This is deliberate — these models use a different API path (OpenAI-compat vs Anthropic) and their deployment list is small and stable. To add a new non-Claude model, edit the `MODELS` array and re-sync.
