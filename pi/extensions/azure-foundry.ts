@@ -1,10 +1,8 @@
 // Azure AI Foundry provider extension (Entra ID auth)
-// Models are discovered dynamically from the ARM API and persisted via pi's
-// provider-scoped model store (context.store). The factory seeds from a legacy
-// cache file (azure-foundry-models.json) for zero-network startup; refreshModels
-// does the ARM discovery after startup, honoring PI_OFFLINE, AbortSignal, and
-// force. Additions and removals in the Foundry portal are picked up automatically.
-// If ARM is unreachable the last-known-good store is used with a console warning.
+// Models are discovered dynamically from the ARM API at startup and persisted
+// to a local cache. Additions and removals in the Foundry portal are picked up
+// automatically. If ARM is unreachable the last-known-good cache is used with
+// a console warning.
 //
 // Configuration — set these env vars before launch:
 //   AZURE_FOUNDRY_BASE_URL           Anthropic API endpoint (e.g. https://<account>.services.ai.azure.com/anthropic/v1)
@@ -239,7 +237,7 @@ async function fetchLiveDeployments(signal?: AbortSignal): Promise<any[]> {
   return models;
 }
 
-// Diff live results against cached models. Logs additions and removals.
+// Diff live results against cache. Logs additions and removals.
 function applyDiff(live: any[], cached: any[]): any[] {
   const liveIds = new Set(live.map((m) => m.id));
   const cachedIds = new Set(cached.map((m) => m.id));
@@ -258,71 +256,44 @@ function applyDiff(live: any[], cached: any[]): any[] {
   return live;
 }
 
+async function resolveModels(): Promise<any[]> {
+  const cache = loadCache();
+
+  let live: any[];
+  try {
+    live = await fetchLiveDeployments();
+  } catch (err: any) {
+    // ARM unreachable — fall back to cache with a warning
+    if (cache) {
+      console.warn(
+        `[azure-foundry] ARM discovery failed (${err.message}). ` +
+        `Using cached model list from ${cache.lastUpdated}.`
+      );
+      return cache.models;
+    }
+    console.error(`[azure-foundry] ARM discovery failed and no cache exists: ${err.message}`);
+    return [];
+  }
+
+  if (live.length === 0) {
+    console.warn("[azure-foundry] ARM returned 0 succeeded deployments — check subscription/RG access.");
+  }
+
+  const final = cache ? applyDiff(live, cache.models) : live;
+  saveCache(final);
+  return final;
+}
+
 // ── Extension entry point ─────────────────────────────────────────────────────
 
-// Current model list. Seeded from the legacy cache file at startup, then
-// updated by refreshModels (which uses context.store for persistence).
-// This lets the factory register synchronously with zero network I/O.
-let currentModels: any[] = [];
-
-export default function (pi: any) {
-  // Seed from the legacy cache file so startup has models immediately without
-  // a network round-trip. refreshModels will subsequently use context.store
-  // for persistence; the legacy file is read-only here (one-time migration seed).
-  const seed = loadCache();
-  if (seed) {
-    currentModels = seed.models;
-  }
+export default async function (pi: any) {
+  const models = await resolveModels();
 
   pi.registerProvider("azure-claude", {
     api: "anthropic",
     baseUrl: BASE_URL,
     apiKey: "entra-id", // required by pi validation, not used for auth
-    models: currentModels,
-
-    // Pi 0.81+ refresh mechanism: called after startup (not during it) to
-    // discover models via ARM. Honors allowNetwork (PI_OFFLINE=1 skips the
-    // ARM call), signal (user cancel aborts the fetch), and force (bypasses
-    // freshness checks). Uses context.store for persistence instead of the
-    // bespoke cache file. Mirrors pi's own catalog refresh and the llama.cpp
-    // reference provider.
-    refreshModels: async (context: any) => {
-      // Restore from store first (instant, offline-safe).
-      const stored = await context.store.read();
-      if (stored?.models) {
-        currentModels = stored.models;
-      }
-
-      // Bail unless network is allowed. PI_OFFLINE=1 or aborted signal skips ARM.
-      if (!context.allowNetwork || context.signal?.aborted) {
-        return currentModels;
-      }
-
-      try {
-        const live = await fetchLiveDeployments(context.signal);
-        if (context.signal?.aborted) return currentModels;
-
-        if (live.length === 0) {
-          console.warn("[azure-foundry] ARM returned 0 succeeded deployments — check subscription/RG access.");
-        }
-
-        const final = currentModels.length > 0 ? applyDiff(live, currentModels) : live;
-        currentModels = final;
-
-        // Persist to context.store (pi's provider-scoped model store).
-        if (!context.signal?.aborted) {
-          await context.store.write({ models: final, checkedAt: Date.now() });
-        }
-      } catch (err: any) {
-        // ARM unreachable — keep current models (from store or seed) with a warning.
-        console.warn(
-          `[azure-foundry] ARM discovery failed (${err.message}). ` +
-          `Using cached model list.`
-        );
-      }
-
-      return currentModels;
-    },
+    models,
 
     streamSimple: function (model: any, context: any, options: any) {
       let finalMessage: any = null;
