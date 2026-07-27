@@ -51,6 +51,14 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
 
+### `plan-mode/`
+Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details.
+
+### `zz-auto-continue/`
+Queues a continuation message after non-retrying compaction so the agent keeps going without manual "continue." Circuit breaker: max 5 auto-continues per user-initiated run.
+
+**Interaction with plan-mode on compaction:** The `zz-` prefix ensures this extension loads after `plan-mode` (extensions load in directory-name order). In plan-mode *execution* sessions, both extensions queue a continuation on `session_compact`. The `hasPendingMessages()` guard in zz-auto-continue does NOT detect plan-mode's queued message because plan-mode uses `pi.sendMessage()` (custom-message path) which does not increment `pendingMessageCount`. This double-queue is harmless — both messages are "continue" variants, the agent processes them in order, and both extensions have circuit breakers. The guard is kept as a best-effort skip for extensions that use `pi.sendUserMessage()` (which does increment `pendingMessageCount`).
+
 ### `azure-openai-models.ts`
 OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed as serverless MaaS on Azure AI Foundry.
 
