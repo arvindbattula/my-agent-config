@@ -96,3 +96,21 @@ az login
 - **Model store via context.store.** `refreshModels` uses pi's provider-scoped model store (`context.store`) for persistence, not a bespoke cache file. The legacy `azure-foundry-models.json` is read once as a seed at startup; new writes go to `context.store`.
 - **Cost data is public list pricing.** Per-token rates are sourced from Anthropic's published pricing and are estimates only. Actual Azure contract rates may differ.
 - **Non-Claude models are statically defined.** Unlike Claude models (discovered dynamically via ARM API), DeepSeek/Kimi models in `azure-openai-models.ts` are defined in a static `MODELS` array. This is deliberate — these models use a different API path (OpenAI-compat vs Anthropic) and their deployment list is small and stable. To add a new non-Claude model, edit the `MODELS` array and re-sync.
+
+## Known Drift & Decisions
+
+Documented deliberately rather than left as tribal knowledge. Revisit when pi upgrades or requirements change.
+
+### Valar has no retry coverage
+
+`settings.json` sets `"retry": {"enabled": false}` globally — correct for the Azure providers, which retry in-extension via `lib/transient-retry.ts` so failed attempts stay out of the chat UI. But `pi/models.json` also defines a `valar` provider with no in-extension retry, so it gets zero retry on anything. All of pi's recent retry improvements (OpenAI Responses early-stream, DNS failures, summarization retry) are switched off for it.
+
+**Decision:** accept the tradeoff. Re-enabling pi's retry globally would stack retries on the Azure providers (which already retry in-extension), producing duplicate attempts and multiple error lines in the TUI. Stripping the in-extension loops to migrate to pi's retry would lose the clean single-error UI. If Valar becomes a daily-use provider, revisit.
+
+### azure-openai-models.ts does not inherit tool-call-ID hardening
+
+Pi 0.81+ fixed OpenAI-compat cross-provider replay to keep tool call IDs unique (#6854) in pi-ai's `convertMessages`/`normalizeToolCallId`. Our extension has its own `convertMessages` and passes `tc.id` through verbatim. We are permanently opted out of that code path and will not inherit future fixes to it. Practical risk is low (Azure MaaS emits unique plain IDs; our converter drops thinking blocks on replay). No action required — revisit if non-Azure models are ever routed through this provider.
+
+### Repo/live settings drift
+
+`pi/settings.json` and `~/.pi/agent/settings.json` differ on `lastChangelogVersion`, `defaultProvider`, and `defaultModel`. This is expected — the live file tracks current usage. `install.sh` syncs `settings.json` to `~/.pi/agent/settings.json`, so a fresh `--force` install will revert the live defaults. Reconcile `pi/settings.json` if the repo should reflect current usage.
