@@ -47,71 +47,101 @@ function getArmToken(): string {
 // against the azure_ai/ channel in LiteLLM's model_prices_and_context_window.json,
 // 2026-06). These are LIST rates, not Azure contract rates — cost shown is an
 // estimate. Update if Anthropic changes published pricing.
-//   Opus 4.5–4.8: $5 / $25 / $0.50 / $6.25 (in/out/cacheRead/cacheWrite per Mtok)
-//   Sonnet 4.5–4.6: $3 / $15 / $0.30 / $3.75
-//   Haiku 4.5:      $1 / $5  / $0.10 / $1.25
+//   Opus 4.5–4.8, Opus 5: $5 / $25 / $0.50 / $6.25 (in/out/cacheRead/cacheWrite per Mtok)
+//   Sonnet 4.5–4.6:     $3 / $15 / $0.30 / $3.75
+//   Sonnet 5:           $2 / $10 / $0.20 / $2.50
+//   Haiku 4.5:          $1 / $5  / $0.10 / $1.25
+//   Fable 5:            $10 / $50 / $1.00 / $12.50
 type Cost = { input: number; output: number; cacheRead: number; cacheWrite: number };
 const perM = (i: number, o: number, cr: number, cw: number): Cost => ({
   input: i / 1e6, output: o / 1e6, cacheRead: cr / 1e6, cacheWrite: cw / 1e6,
 });
 const OPUS_COST = perM(5, 25, 0.5, 6.25);
 const SONNET_COST = perM(3, 15, 0.3, 3.75);
+const SONNET_5_COST = perM(2, 10, 0.2, 2.5);
 const HAIKU_COST = perM(1, 5, 0.1, 1.25);
+const FABLE_COST = perM(10, 50, 1, 12.5);
 const ZERO_COST: Cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+// Pi-ai's per-model thinkingLevelMap. Keys are pi thinking levels (off, minimal,
+// low, medium, high, xhigh, max); values are the provider-specific effort name, or
+// null to explicitly disable that level. Levels absent from the map are offered by
+// default (off→high) except xhigh/max, which require explicit presence.
+//   See getSupportedThinkingLevels in pi-ai/dist/models.js.
+type ThinkingLevelMap = Record<string, string | null>;
 
 // Keyed by the underlying model name returned in deployment.properties.model.name.
 // Only needs updating when a genuinely new model family ships with different limits.
 // `adaptive` mirrors pi-ai's compat.forceAdaptiveThinking: these models reject
 // thinking.type="enabled" (budget-based) and require thinking.type="adaptive" with
-// output_config.effort. `xhighEffort` is the effort name a model accepts for the
-// pi "xhigh" level (from pi-ai's per-model thinkingLevelMap); other levels use the
-// minimal/low→low, medium→medium, high→high fallback.
+// output_config.effort. `thinkingLevelMap` is passed through to pi verbatim so
+// getSupportedThinkingLevels offers the right levels (xhigh/max only where the
+// model actually supports them; off:null on Fable 5 which cannot disable thinking).
+// Both fields are sourced from pi-ai's bundled anthropic.json catalog — the
+// regression test in azure-model-specs.test.mjs asserts they stay in sync.
 type Spec = {
   contextWindow: number;
   maxTokens: number;
   reasoning: boolean;
   cost: Cost;
   adaptive?: boolean;
-  xhighEffort?: string;
+  thinkingLevelMap?: ThinkingLevelMap;
 };
 
-const MODEL_SPECS: Record<string, Spec> = {
-  "claude-haiku-4-5":  { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: HAIKU_COST  },
-  "claude-sonnet-4-5": { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: SONNET_COST },
-  "claude-sonnet-4-6": { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: SONNET_COST, adaptive: true, xhighEffort: "xhigh" },
-  "claude-opus-4-5":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST   },
-  "claude-opus-4-6":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
-  "claude-opus-4-7":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
-  "claude-opus-4-8":   { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
-  "claude-fable-5":    { contextWindow: 200000, maxTokens: 32000, reasoning: true,  cost: OPUS_COST,   adaptive: true, xhighEffort: "xhigh" },
+export const MODEL_SPECS: Record<string, Spec> = {
+  "claude-haiku-4-5":  { contextWindow: 200000, maxTokens: 64000,  reasoning: true,  cost: HAIKU_COST },
+  "claude-sonnet-4-5": { contextWindow: 1000000, maxTokens: 64000,  reasoning: true,  cost: SONNET_COST },
+  "claude-sonnet-4-6": { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: SONNET_COST, adaptive: true, thinkingLevelMap: { max: "max" } },
+  "claude-opus-4-5":   { contextWindow: 200000, maxTokens: 64000,  reasoning: true,  cost: OPUS_COST },
+  "claude-opus-4-6":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { max: "max" } },
+  "claude-opus-4-7":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
+  "claude-opus-4-8":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
+  "claude-fable-5":    { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: FABLE_COST,  adaptive: true, thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" } },
+  "claude-opus-5":     { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
+  "claude-sonnet-5":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: SONNET_5_COST, adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
 };
 
 const SPEC_DEFAULTS: Spec = { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: ZERO_COST };
 
 // Resolve per-token rates for a deployment id by matching the underlying model
 // name in MODEL_SPECS. Used so cost works even if a model came from a stale
-// cache with zeroed rates.
+// cache with zeroed rates. Longest-match-first so a deployment ID like
+// "qcg-claude-opus-4-5-20251101" matches "claude-opus-4-5" and not a shorter key.
 function rateForModel(model: any): Cost {
   if (model?.cost && model.cost.input > 0) return model.cost;
   const id: string = model?.id ?? "";
+  let best: { cost: Cost } | null = null;
+  let bestLen = -1;
   for (const [name, spec] of Object.entries(MODEL_SPECS)) {
-    if (id.includes(name)) return spec.cost;
+    if (id.includes(name) && name.length > bestLen) {
+      best = { cost: spec.cost };
+      bestLen = name.length;
+    }
   }
-  return ZERO_COST;
+  return best?.cost ?? ZERO_COST;
 }
 
-// Resolve thinking spec for a model. Prefers the fields built onto the model object,
-// but falls back to a MODEL_SPECS lookup by id so models loaded from an older cache
-// (built before these fields existed) still get the correct thinking mode.
-function thinkingSpecForModel(model: any): { adaptive: boolean; xhighEffort?: string } {
-  if (typeof model?.adaptiveThinking === "boolean") {
-    return { adaptive: model.adaptiveThinking, xhighEffort: model.xhighEffort };
-  }
+// Resolve thinking spec for a model. MODEL_SPECS is the source of truth — always
+// look up by id (longest-match-first) so models loaded from an older cache (missing
+// thinkingLevelMap or with stale adaptive) get the correct spec. Only fall back to
+// the model object's own fields when the model isn't in MODEL_SPECS at all.
+function thinkingSpecForModel(model: any): { adaptive: boolean; thinkingLevelMap?: ThinkingLevelMap } {
   const id: string = model?.id ?? "";
+  let best: { spec: Spec } | null = null;
+  let bestLen = -1;
   for (const [name, spec] of Object.entries(MODEL_SPECS)) {
-    if (id.includes(name)) return { adaptive: spec.adaptive ?? false, xhighEffort: spec.xhighEffort };
+    if (id.includes(name) && name.length > bestLen) {
+      best = { spec };
+      bestLen = name.length;
+    }
   }
-  return { adaptive: false };
+  if (best) {
+    return { adaptive: best.spec.adaptive ?? false, thinkingLevelMap: best.spec.thinkingLevelMap };
+  }
+  // Unknown model — use whatever the model object has, or defaults.
+  return {
+    adaptive: typeof model?.adaptiveThinking === "boolean" ? model.adaptiveThinking : false,
+  };
 }
 
 // ── Cache helpers ─────────────────────────────────────────────────────────────
@@ -155,17 +185,25 @@ function deploymentDisplayName(deploymentName: string): string {
 }
 
 function buildModel(deploymentName: string, underlyingModelName: string): any {
-  const spec = MODEL_SPECS[underlyingModelName] ?? SPEC_DEFAULTS;
+  const spec = MODEL_SPECS[underlyingModelName];
+  if (!spec) {
+    console.warn(
+      `[azure-foundry] No MODEL_SPECS entry for "${underlyingModelName}" ` +
+      `(deployment: ${deploymentName}); using defaults (no reasoning, zero cost, ` +
+      `200K context). Update MODEL_SPECS to fix.`
+    );
+  }
+  const resolved = spec ?? SPEC_DEFAULTS;
   return {
     id: deploymentName,
     name: deploymentDisplayName(deploymentName),
-    reasoning: spec.reasoning,
+    reasoning: resolved.reasoning,
     input: ["text", "image"],
-    contextWindow: spec.contextWindow,
-    maxTokens: spec.maxTokens,
-    cost: spec.cost,
-    adaptiveThinking: spec.adaptive ?? false,
-    xhighEffort: spec.xhighEffort,
+    contextWindow: resolved.contextWindow,
+    maxTokens: resolved.maxTokens,
+    cost: resolved.cost,
+    adaptiveThinking: resolved.adaptive ?? false,
+    thinkingLevelMap: resolved.thinkingLevelMap,
   };
 }
 
@@ -395,24 +433,27 @@ export default async function (pi: any) {
         // behaves like the built-in Anthropic provider.
         if (model.reasoning && options?.reasoning) {
           const level = options.reasoning;
-          const { adaptive, xhighEffort } = thinkingSpecForModel(model);
+          const { adaptive, thinkingLevelMap } = thinkingSpecForModel(model);
           if (adaptive) {
-            // Adaptive-thinking models (Sonnet 4.6, Opus 4.6+, Fable 5) reject
-            // thinking.type="enabled". Claude decides the budget; we pass an effort
-            // level via output_config. Mirrors pi-ai mapThinkingLevelToEffort: the
-            // model-specific xhigh effort name, else minimal/low→low, medium→medium,
-            // high (and any unknown)→high.
+            // Adaptive-thinking models (Sonnet 4.6, Opus 4.6+, Fable 5, Opus 5,
+            // Sonnet 5) reject thinking.type="enabled". Claude decides the budget;
+            // we pass an effort level via output_config. Mirrors pi-ai
+            // mapThinkingLevelToEffort: xhigh/max use the model-specific effort
+            // name from thinkingLevelMap (fall back to "high" if absent); other
+            // levels use minimal/low→low, medium→medium, high→high.
             let effort: string;
-            switch (level) {
-              case "minimal":
-              case "low":
-                effort = "low"; break;
-              case "medium":
-                effort = "medium"; break;
-              case "xhigh":
-                effort = xhighEffort ?? "high"; break;
-              default:
-                effort = "high";
+            if (level === "xhigh" || level === "max") {
+              effort = thinkingLevelMap?.[level] ?? "high";
+            } else {
+              switch (level) {
+                case "minimal":
+                case "low":
+                  effort = "low"; break;
+                case "medium":
+                  effort = "medium"; break;
+                default:
+                  effort = "high";
+              }
             }
             body.thinking = { type: "adaptive", display: "summarized" };
             body.output_config = { effort };
