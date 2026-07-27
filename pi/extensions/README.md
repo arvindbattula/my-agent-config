@@ -21,6 +21,8 @@ Anthropic-compatible provider for Claude models deployed through Azure AI Foundr
 
 Auth uses Entra ID via `az cli`.
 
+Model specs (`MODEL_SPECS`) are sourced from pi-ai's bundled `anthropic.json` catalog — context window, max tokens, reasoning flag, cost, `thinkingLevelMap`, and adaptive-thinking mode all match the catalog entry for each model. A regression test (`azure-model-specs.test.mjs`) asserts field-by-field parity to prevent drift. Unknown Claude deployments emit a console warning instead of silently degrading to defaults.
+
 ### `lifecycle-guards/`
 Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extension event system. Provides the same deterministic rules in both runtimes:
 
@@ -40,6 +42,15 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 
 **Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (56 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (35 assertions across all five hooks, including command-policy parity, per-file gate tracking, and cross-session staleness).
 
+### Test files
+
+| File | Checks | What it guards |
+|---|---|---|
+| `azure-stream-result.test.mjs` | 14 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff |
+| `lifecycle-guards/lifecycle-guards.test.mjs` | 56 | Pure-logic unit tests for all guard rules |
+| `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
+| `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
+
 ### `azure-openai-models.ts`
 OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed as serverless MaaS on Azure AI Foundry.
 
@@ -48,7 +59,7 @@ OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed
 - `AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID` — Deployment ID for DeepSeek model
 - `AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID` — Deployment ID for Kimi model
 
-Auth uses Entra ID via `az cli`. Models are defined statically — add new deployments by editing the `MODELS` array in the source.
+Auth uses Entra ID via `az cli`. Models are defined statically — add new deployments by editing the `MODELS` array in the source. Kimi's `thinkingLevelMap` uses explicit `null` values for unsupported levels (minimal, xhigh, max) so pi's UI only offers the levels Kimi actually supports. `reasoning_effort` is read from `options.reasoning` (the `SimpleStreamOptions` field), not the internal `reasoningEffort` field that pi-ai's wrapper computes.
 
 ## Setting Up on a New Machine
 
