@@ -31,6 +31,41 @@ function getAccessToken(): string {
   return getAzureToken(COGNITIVE_SERVICES_RESOURCE);
 }
 
+// ── Thinking-level clamping ──────────────────────────────────────────────────
+// pi-ai's built-in streamSimple wrapper clamps the requested thinking level to
+// the model's supported set before delegating to stream(). Our extension is called
+// directly by provider-composer.js with the raw SimpleStreamOptions, bypassing that
+// wrapper, so we must clamp ourselves. The logic mirrors pi-ai's getSupportedThinkingLevels
+// and clampThinkingLevel (dist/models.js) exactly — keeping it inline avoids a runtime
+// dependency on @earendil-works/pi-ai which is only resolvable via jiti aliases at
+// pi load time, not from the test environment.
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+function getSupportedThinkingLevels(model: any): string[] {
+  if (!model.reasoning) return ["off"];
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== undefined;
+    return true;
+  });
+}
+
+function clampThinkingLevel(model: any, level: string): string {
+  const available = getSupportedThinkingLevels(model);
+  if (available.includes(level)) return level;
+  const idx = THINKING_LEVELS.indexOf(level);
+  if (idx === -1) return available[0] ?? "off";
+  // Search forward first (prefer higher effort), then backward.
+  for (let i = idx; i < THINKING_LEVELS.length; i++) {
+    if (available.includes(THINKING_LEVELS[i])) return THINKING_LEVELS[i];
+  }
+  for (let i = idx - 1; i >= 0; i--) {
+    if (available.includes(THINKING_LEVELS[i])) return THINKING_LEVELS[i];
+  }
+  return available[0] ?? "off";
+}
+
 // ── Model definitions ────────────────────────────────────────────────────────
 
 const BASE_MODELS = [
@@ -58,7 +93,9 @@ const BASE_MODELS = [
     contextWindow: 262144,
     maxTokens: 200000,
     cost: { input: 0.95, output: 4, cacheRead: 0, cacheWrite: 0 },
-    thinkingLevelMap: { low: "low", medium: "medium", high: "high" } as Record<string, string>,
+    // Explicit nulls for minimal/xhigh/max so pi's getSupportedThinkingLevels
+    // only offers off, low, medium, high — Kimi does not support the other levels.
+    thinkingLevelMap: { minimal: null, low: "low", medium: "medium", high: "high", xhigh: null, max: null } as Record<string, string | null>,
     compat: {
       supportsDeveloperRole: false,
       maxTokensField: "max_tokens",
@@ -195,8 +232,17 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       if (maxTokens) {
         body[model.compat?.maxTokensField ?? "max_tokens"] = maxTokens;
       }
-      if (options?.reasoningEffort && model.reasoning && model.compat?.supportsReasoningEffort) {
-        body.reasoning_effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
+      // pi passes the thinking level on SimpleStreamOptions.reasoning (a ThinkingLevel:
+      // off | minimal | low | medium | high | xhigh | max). The internal `reasoningEffort`
+      // field is only created by pi-ai's own openai-completions.streamSimple wrapper,
+      // which our extension bypasses — provider-composer.js calls us directly with the
+      // raw options. Read options.reasoning, clamp to the model's supported levels, and
+      // treat "off" as omit (mirrors pi-ai's `clampedReasoning === "off" ? undefined`).
+      if (options?.reasoning && options.reasoning !== "off" && model.reasoning && model.compat?.supportsReasoningEffort) {
+        const clamped = clampThinkingLevel(model, options.reasoning);
+        if (clamped !== "off") {
+          body.reasoning_effort = model.thinkingLevelMap?.[clamped] ?? clamped;
+        }
       }
       if (tools.length > 0) body.tools = tools;
 
