@@ -111,6 +111,10 @@ Documented deliberately rather than left as tribal knowledge. Revisit when pi up
 
 Pi 0.81+ fixed OpenAI-compat cross-provider replay to keep tool call IDs unique (#6854) in pi-ai's `convertMessages`/`normalizeToolCallId`. Our extension has its own `convertMessages` and passes `tc.id` through verbatim. We are permanently opted out of that code path and will not inherit future fixes to it. Practical risk is low (Azure MaaS emits unique plain IDs; our converter drops thinking blocks on replay). No action required — revisit if non-Azure models are ever routed through this provider.
 
+### Azure extensions do not inherit per-request fetch injection
+
+Pi 0.83+ added inherited per-request fetch injection for supported text and image provider transports. Both Azure extensions call `fetch()` directly inside `streamSimple` (via `lib/transient-retry.ts`), bypassing pi-ai's built-in transports. We are permanently opted out of any transport-level features pi builds on top of fetch injection (custom retry, proxy support, telemetry, etc.). The extensions already provide their own retry and auth, so the practical gap is narrow. Revisit if pi adds significant transport-level capabilities via fetch injection.
+
 ### Repo/live settings drift
 
 `pi/settings.json` and `~/.pi/agent/settings.json` differ on `lastChangelogVersion`, `defaultProvider`, and `defaultModel`. This is expected — the live file tracks current usage. `install.sh` syncs `settings.json` to `~/.pi/agent/settings.json`, so a fresh `--force` install will revert the live defaults. Reconcile `pi/settings.json` if the repo should reflect current usage.

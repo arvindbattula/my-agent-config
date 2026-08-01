@@ -103,6 +103,17 @@ export const MODEL_SPECS: Record<string, Spec> = {
 
 const SPEC_DEFAULTS: Spec = { contextWindow: 200000, maxTokens: 16384, reasoning: false, cost: ZERO_COST };
 
+// Map Anthropic's stop_reason values to pi's canonical stop-reason names.
+// Unknown reasons pass through verbatim (pi 0.83+ surfaces them as raw provider
+// stop reasons). Without this map, tool_use/max_tokens/stop_sequence would hit
+// pi's unmapped→error path (#7272).
+const STOP_REASON_MAP: Record<string, string> = {
+  end_turn: "stop",
+  max_tokens: "length",
+  stop_sequence: "stop",
+  tool_use: "toolUse",
+};
+
 // Resolve per-token rates for a deployment id by matching the underlying model
 // name in MODEL_SPECS. Used so cost works even if a model came from a stale
 // cache with zeroed rates. Longest-match-first so a deployment ID like
@@ -537,6 +548,7 @@ export default async function (pi: any) {
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
+        let gotTerminalStopReason = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -674,11 +686,20 @@ export default async function (pi: any) {
                   u.cost.total = u.cost.input + u.cost.output + u.cost.cacheRead + u.cost.cacheWrite;
                 }
                 if (event.delta?.stop_reason) {
-                  output.stopReason = event.delta.stop_reason === "end_turn" ? "stop" : event.delta.stop_reason;
+                  const sr = event.delta.stop_reason;
+                  output.stopReason = STOP_REASON_MAP[sr] ?? sr;
+                  gotTerminalStopReason = true;
                 }
                 break;
             }
           }
+        }
+
+        // If the stream ended without a terminal stop_reason (e.g. connection
+        // dropped, partial message), report "pending" per pi 0.83's partial-stream
+        // semantics (#7151) rather than the default "stop".
+        if (!gotTerminalStopReason) {
+          output.stopReason = "pending";
         }
 
         yield { type: "done", reason: output.stopReason, message: output };

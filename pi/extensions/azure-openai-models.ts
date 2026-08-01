@@ -298,6 +298,7 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let gotTerminalStopReason = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -332,9 +333,9 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
           // Finish reason
           if (choice.finish_reason) {
             switch (choice.finish_reason) {
-              case "stop": case "end": output.stopReason = "stop"; break;
-              case "length": output.stopReason = "length"; break;
-              case "tool_calls": output.stopReason = "toolUse"; break;
+              case "stop": case "end": output.stopReason = "stop"; gotTerminalStopReason = true; break;
+              case "length": output.stopReason = "length"; gotTerminalStopReason = true; break;
+              case "tool_calls": output.stopReason = "toolUse"; gotTerminalStopReason = true; break;
               case "content_filter":
                 throw new Error("Provider finish_reason: content_filter");
             }
@@ -409,6 +410,9 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
       }
 
       finalMessage = output;
+      if (!gotTerminalStopReason) {
+        output.stopReason = "pending";
+      }
       yield { type: "done", reason: output.stopReason, message: output };
     } catch (error) {
       for (const block of output.content) {

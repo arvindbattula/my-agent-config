@@ -315,6 +315,139 @@ await check("azure-foundry retry loop: invalid env (NaN) falls back to default, 
   }
 });
 
+// ── Stop-reason mapping tests (pi 0.83 alignment) ─────────────────────────────
+// Pi 0.83 (#7272) surfaces unmapped terminal stop reasons as provider errors
+// instead of successful stops. Our extensions must map known provider stop
+// reasons to pi's canonical names. Also tests the "pending" stop reason
+// (#7151) for streams that end without a terminal stop reason.
+
+/** Build a Response with a ReadableStream body containing SSE lines. */
+function sseResponse(lines) {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    start(controller) {
+      for (const line of lines) {
+        controller.enqueue(encoder.encode(`data: ${line}\n\n`));
+      }
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+// ── azure-foundry.ts: STOP_REASON_MAP correctness ────────────────────────────
+
+await check("azure-foundry: tool_use stop_reason → canonical 'toolUse'", async () => {
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 5 } } }),
+    JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+    JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } }),
+    JSON.stringify({ type: "content_block_stop", index: 0 }),
+    JSON.stringify({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 3 } }),
+  ]);
+  const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "toolUse", `tool_use must map to 'toolUse', got '${msg.stopReason}'`);
+});
+
+await check("azure-foundry: max_tokens stop_reason → canonical 'length'", async () => {
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 5 } } }),
+    JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+    JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } }),
+    JSON.stringify({ type: "content_block_stop", index: 0 }),
+    JSON.stringify({ type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 3 } }),
+  ]);
+  const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "length", `max_tokens must map to 'length', got '${msg.stopReason}'`);
+});
+
+await check("azure-foundry: stop_sequence stop_reason → canonical 'stop'", async () => {
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 5 } } }),
+    JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+    JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } }),
+    JSON.stringify({ type: "content_block_stop", index: 0 }),
+    JSON.stringify({ type: "message_delta", delta: { stop_reason: "stop_sequence" }, usage: { output_tokens: 3 } }),
+  ]);
+  const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "stop", `stop_sequence must map to 'stop', got '${msg.stopReason}'`);
+});
+
+await check("azure-foundry: end_turn stop_reason → canonical 'stop'", async () => {
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 5 } } }),
+    JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+    JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } }),
+    JSON.stringify({ type: "content_block_stop", index: 0 }),
+    JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } }),
+  ]);
+  const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "stop", `end_turn must map to 'stop', got '${msg.stopReason}'`);
+});
+
+await check("azure-foundry: stream ending without stop_reason → 'pending'", async () => {
+  // SSE stream with content but NO message_delta/stop_reason event — simulates
+  // a dropped connection or truncated response.
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 5 } } }),
+    JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+    JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial..." } }),
+    // No content_block_stop, no message_delta — stream just ends.
+  ]);
+  const stream = await foundryStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "pending", `stream without terminal stop_reason should be 'pending', got '${msg.stopReason}'`);
+});
+
+// ── azure-openai-models.ts: partial-stream pending fallback ──────────────────
+
+await check("azure-openai-models: stream ending without finish_reason → 'pending'", async () => {
+  const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
+  // OpenAI SSE with content but no finish_reason on any chunk.
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ choices: [{ delta: { content: "partial..." }, finish_reason: null }] }),
+    JSON.stringify({ choices: [{ delta: {}, finish_reason: null }] }),
+    // No finish_reason ever arrives — stream just ends.
+  ]);
+  const stream = await openaiStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "pending", `stream without finish_reason should be 'pending', got '${msg.stopReason}'`);
+});
+
+await check("azure-openai-models: tool_calls finish_reason → canonical 'toolUse'", async () => {
+  const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: null }] }),
+    JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }),
+  ]);
+  const stream = await openaiStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "toolUse", `tool_calls must map to 'toolUse', got '${msg.stopReason}'`);
+});
+
+await check("azure-openai-models: length finish_reason → canonical 'length'", async () => {
+  const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: null }] }),
+    JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] }),
+  ]);
+  const stream = await openaiStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "length", `length must map to 'length', got '${msg.stopReason}'`);
+});
+
 // Restore network-disabled stub for any future checks.
 globalThis.fetch = async () => { throw new Error("network disabled in test"); };
 
