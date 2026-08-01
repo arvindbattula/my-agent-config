@@ -448,6 +448,18 @@ await check("azure-openai-models: length finish_reason → canonical 'length'", 
   assert.equal(msg.stopReason, "length", `length must map to 'length', got '${msg.stopReason}'`);
 });
 
+await check("azure-openai-models: unknown finish_reason passes through (not 'pending')", async () => {
+  const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
+  globalThis.fetch = async () => sseResponse([
+    JSON.stringify({ choices: [{ delta: { content: "ok" }, finish_reason: null }] }),
+    JSON.stringify({ choices: [{ delta: {}, finish_reason: "insensitive_stream" }] }),
+  ]);
+  const stream = await openaiStreamSimple(MODEL, CONTEXT, {});
+  for await (const _ of stream) { /* drain */ }
+  const msg = await stream.result();
+  assert.equal(msg.stopReason, "insensitive_stream", `unknown finish_reason must pass through, got '${msg.stopReason}'`);
+});
+
 // Restore network-disabled stub for any future checks.
 globalThis.fetch = async () => { throw new Error("network disabled in test"); };
 

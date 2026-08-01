@@ -46,7 +46,7 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 
 | File | Checks | What it guards |
 |---|---|---|
-| `azure-stream-result.test.mjs` | 14 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff |
+| `azure-stream-result.test.mjs` | 23 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff; stop-reason mapping; pending fallback for partial streams |
 | `lifecycle-guards/lifecycle-guards.test.mjs` | 56 | Pure-logic unit tests for all guard rules |
 | `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |

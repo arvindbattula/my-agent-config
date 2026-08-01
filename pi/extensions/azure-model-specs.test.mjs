@@ -11,14 +11,12 @@
 
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { createRequire } from "node:module";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { execSync } from "node:child_process";
 
 // Resolve extensionless relative imports inside the .ts extensions.
 register("./ts-resolve-hook.mjs", import.meta.url);
-const require = createRequire(import.meta.url);
 
 // Required env vars read at module load time (azure-foundry.ts calls requireEnv
 // at the top level).

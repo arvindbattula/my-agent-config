@@ -338,6 +338,13 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
               case "tool_calls": output.stopReason = "toolUse"; gotTerminalStopReason = true; break;
               case "content_filter":
                 throw new Error("Provider finish_reason: content_filter");
+              default:
+                // Unknown finish_reason: pass through raw value (pi 0.83 surfaces
+                // unmapped terminal reasons as provider errors per #7272). Mark as
+                // terminal so the pending fallback doesn't mask it.
+                output.stopReason = choice.finish_reason;
+                gotTerminalStopReason = true;
+                break;
             }
           }
 
