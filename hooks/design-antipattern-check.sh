@@ -63,14 +63,19 @@ fi
 # Collect warnings into a JSON array (grep may exit 1 when no lines match — that's OK)
 WARNINGS_JSON=$(echo -e "$WARNINGS" | { grep -v '^$' || true; } | jq -R '.' 2>/dev/null | jq -s '.' 2>/dev/null || echo '[]')
 
-# Update this file's entry: set it when failing, remove it when clean
+# Update this file's entry: set it when failing, remove it when clean.
+# MSYS_NO_PATHCONV (Git for Windows) / MSYS2_ARG_CONV_EXCL (MSYS2) suppress
+# Git Bash's argv path conversion, which otherwise rewrites POSIX-style
+# substrings in $FILE_PATH (e.g. /tmp/x -> C:/Users/.../Temp/x) before native
+# jq.exe sees them, storing mangled keys in the gate file. Both vars are
+# inert on macOS/Linux.
 if [[ -n "$WARNINGS" ]]; then
-  UPDATED=$(echo "$EXISTING" | jq -c --arg f "$FILE_PATH" --argjson w "$WARNINGS_JSON" '. + {($f): $w}' 2>/dev/null || echo "$EXISTING")
+  UPDATED=$(echo "$EXISTING" | MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -c --arg f "$FILE_PATH" --argjson w "$WARNINGS_JSON" '. + {($f): $w}' 2>/dev/null || echo "$EXISTING")
 else
-  UPDATED=$(echo "$EXISTING" | jq -c --arg f "$FILE_PATH" 'del(.[$f])' 2>/dev/null || echo "$EXISTING")
+  UPDATED=$(echo "$EXISTING" | MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -c --arg f "$FILE_PATH" 'del(.[$f])' 2>/dev/null || echo "$EXISTING")
 fi
 
-jq -cn \
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' jq -cn \
   --arg sid "$SESSION_ID" \
   --argjson failing "$UPDATED" \
   '{session_id:$sid, failing_files:$failing}' \

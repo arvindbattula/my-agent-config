@@ -21,7 +21,12 @@ pass() { PASS=$((PASS + 1)); printf '  \033[0;32m✓\033[0m %s\n' "$1"; }
 fail() { FAIL=$((FAIL + 1)); printf '  \033[0;31m✗\033[0m %s\n' "$1"; }
 
 # json <value>  -> JSON-encoded string of the argument
-json() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }
+# Piped via stdin, not argv: Git Bash/MSYS auto-converts POSIX-looking argv
+# strings (e.g. /tmp/xxx) to Windows form (C:/Users/...) when calling a
+# native (non-MSYS) exe like python3 on Windows, silently corrupting any
+# path fixture passed as an argument. Reading from stdin isn't subject to
+# that conversion.
+json() { python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip("\n")))' <<< "$1"; }
 
 # run_hook <hook> <payload-json>  -> prints nothing, sets RC
 run_hook() {
@@ -47,6 +52,34 @@ pp "../outside.txt";  expect_exit "block path outside repo" 2
 pp "sub/../.env";     expect_exit "block .env via traversal" 2
 pp "src/app.ts";      expect_exit "allow src/app.ts" 0
 pp "docs/readme.md";  expect_exit "allow docs/readme.md" 0
+
+# Outside-root exemptions: scratchpad (<temp>/claude/), plans, memory.
+# pp_from runs the hook with an explicit TMPDIR and cwd distinct from the
+# temp root, so the exemption (not the inside-project branch) is what allows.
+EXEMPT_PROJ="$TMP/exempt-proj"; mkdir -p "$EXEMPT_PROJ"
+pp_from() { # <file_path> — cwd=$EXEMPT_PROJ, TMPDIR=$TMP
+  printf '{"tool_input":{"file_path":%s},"cwd":%s}' "$(json "$1")" "$(json "$EXEMPT_PROJ")" \
+    | TMPDIR="$TMP" bash "$SCRIPT_DIR/protect-paths.sh" >/dev/null 2>&1
+  RC=$?
+}
+pp_from "$TMP/claude/sess/scratchpad/x.txt"; expect_exit "allow scratchpad under \$TMPDIR/claude" 0
+pp_from "$TMP/no-claude/x.txt";              expect_exit "block temp path outside claude/ subtree" 2
+pp_from "/tmp/claude/sess/scratchpad/x.txt"; expect_exit "allow /tmp/claude (literal fallback root)" 0
+pp_from "$HOME/.claude/plans/x.md";          expect_exit "allow plan-mode file in ~/.claude/plans" 0
+pp_from "$HOME/.claude/projects/some-proj/memory/note.md"; expect_exit "allow auto-memory file" 0
+
+# Fail-closed tiers
+run_hook protect-paths.sh 'this is not json'
+expect_exit "fail closed on unparseable payload" 2
+run_hook protect-paths.sh '{"tool_input":{}}'
+expect_exit "allow valid payload without file_path" 0
+run_hook protect-paths.sh 'null'
+expect_exit "allow valid-but-falsy JSON payload (null)" 0
+BASH_BIN="$(command -v bash)"
+printf '{"tool_input":{"file_path":".env"}}' \
+  | PATH=/nonexistent "$BASH_BIN" "$SCRIPT_DIR/protect-paths.sh" >/dev/null 2>&1
+RC=$?
+expect_exit "fail closed when jq missing (PATH stripped)" 2
 
 # ── command-policy.sh ─────────────────────────────────────────────────────
 echo "command-policy.sh"
