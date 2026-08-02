@@ -26,7 +26,8 @@ fi
 INPUT=$(cat)
 
 # Fail closed: an unparseable payload means we cannot know what is being written.
-if ! printf '%s' "$INPUT" | jq -e . >/dev/null 2>&1; then
+# jq empty (not -e) so valid-but-falsy JSON like null is parseable, not blocked.
+if ! printf '%s' "$INPUT" | jq empty >/dev/null 2>&1; then
   echo "BLOCKED (fail-closed): protect-paths.sh received an unparseable hook payload." >&2
   exit 2
 fi

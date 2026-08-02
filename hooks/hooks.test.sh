@@ -73,8 +73,11 @@ run_hook protect-paths.sh 'this is not json'
 expect_exit "fail closed on unparseable payload" 2
 run_hook protect-paths.sh '{"tool_input":{}}'
 expect_exit "allow valid payload without file_path" 0
+run_hook protect-paths.sh 'null'
+expect_exit "allow valid-but-falsy JSON payload (null)" 0
+BASH_BIN="$(command -v bash)"
 printf '{"tool_input":{"file_path":".env"}}' \
-  | PATH=/nonexistent /usr/bin/bash "$SCRIPT_DIR/protect-paths.sh" >/dev/null 2>&1
+  | PATH=/nonexistent "$BASH_BIN" "$SCRIPT_DIR/protect-paths.sh" >/dev/null 2>&1
 RC=$?
 expect_exit "fail closed when jq missing (PATH stripped)" 2
 
