@@ -21,6 +21,8 @@ Anthropic-compatible provider for Claude models deployed through Azure AI Foundr
 
 Auth uses Entra ID via `az cli`.
 
+Model specs (`MODEL_SPECS`) are sourced from pi-ai's bundled `anthropic.json` catalog — context window, max tokens, reasoning flag, cost, `thinkingLevelMap`, and adaptive-thinking mode all match the catalog entry for each model. A regression test (`azure-model-specs.test.mjs`) asserts field-by-field parity to prevent drift. Unknown Claude deployments emit a console warning instead of silently degrading to defaults.
+
 ### `lifecycle-guards/`
 Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extension event system. Provides the same deterministic rules in both runtimes:
 
@@ -40,6 +42,23 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 
 **Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (56 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (35 assertions across all five hooks, including command-policy parity, per-file gate tracking, and cross-session staleness).
 
+### Test files
+
+| File | Checks | What it guards |
+|---|---|---|
+| `azure-stream-result.test.mjs` | 23 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff; stop-reason mapping; pending fallback for partial streams |
+| `lifecycle-guards/lifecycle-guards.test.mjs` | 56 | Pure-logic unit tests for all guard rules |
+| `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
+| `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
+
+### `plan-mode/`
+Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details.
+
+### `zz-auto-continue/`
+Queues a continuation message after non-retrying compaction so the agent keeps going without manual "continue." Circuit breaker: max 5 auto-continues per user-initiated run.
+
+**Interaction with plan-mode on compaction:** The `zz-` prefix ensures this extension loads after `plan-mode` (extensions load in directory-name order). In plan-mode *execution* sessions, both extensions queue a continuation on `session_compact`. The `hasPendingMessages()` guard in zz-auto-continue does NOT detect plan-mode's queued message because plan-mode uses `pi.sendMessage()` (custom-message path) which does not increment `pendingMessageCount`. This double-queue is harmless — both messages are "continue" variants, the agent processes them in order, and both extensions have circuit breakers. The guard is kept as a best-effort skip for extensions that use `pi.sendUserMessage()` (which does increment `pendingMessageCount`).
+
 ### `azure-openai-models.ts`
 OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed as serverless MaaS on Azure AI Foundry.
 
@@ -48,7 +67,7 @@ OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed
 - `AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID` — Deployment ID for DeepSeek model
 - `AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID` — Deployment ID for Kimi model
 
-Auth uses Entra ID via `az cli`. Models are defined statically — add new deployments by editing the `MODELS` array in the source.
+Auth uses Entra ID via `az cli`. Models are defined statically — add new deployments by editing the `MODELS` array in the source. Kimi's `thinkingLevelMap` uses explicit `null` values for unsupported levels (minimal, xhigh, max) so pi's UI only offers the levels Kimi actually supports. `reasoning_effort` is read from `options.reasoning` (the `SimpleStreamOptions` field), not the internal `reasoningEffort` field that pi-ai's wrapper computes.
 
 ## Setting Up on a New Machine
 
@@ -77,3 +96,25 @@ az login
 - **Cache files stay local.** `azure-foundry-models.json` is a runtime artifact generated from live ARM discovery. It is gitignored and never committed.
 - **Cost data is public list pricing.** Per-token rates are sourced from Anthropic's published pricing and are estimates only. Actual Azure contract rates may differ.
 - **Non-Claude models are statically defined.** Unlike Claude models (discovered dynamically via ARM API), DeepSeek/Kimi models in `azure-openai-models.ts` are defined in a static `MODELS` array. This is deliberate — these models use a different API path (OpenAI-compat vs Anthropic) and their deployment list is small and stable. To add a new non-Claude model, edit the `MODELS` array and re-sync.
+
+## Known Drift & Decisions
+
+Documented deliberately rather than left as tribal knowledge. Revisit when pi upgrades or requirements change.
+
+### Valar has no retry coverage
+
+`settings.json` sets `"retry": {"enabled": false}` globally — correct for the Azure providers, which retry in-extension via `lib/transient-retry.ts` so failed attempts stay out of the chat UI. But `pi/models.json` also defines a `valar` provider with no in-extension retry, so it gets zero retry on anything. All of pi's recent retry improvements (OpenAI Responses early-stream, DNS failures, summarization retry) are switched off for it.
+
+**Decision:** accept the tradeoff. Re-enabling pi's retry globally would stack retries on the Azure providers (which already retry in-extension), producing duplicate attempts and multiple error lines in the TUI. Stripping the in-extension loops to migrate to pi's retry would lose the clean single-error UI. If Valar becomes a daily-use provider, revisit.
+
+### azure-openai-models.ts does not inherit tool-call-ID hardening
+
+Pi 0.81+ fixed OpenAI-compat cross-provider replay to keep tool call IDs unique (#6854) in pi-ai's `convertMessages`/`normalizeToolCallId`. Our extension has its own `convertMessages` and passes `tc.id` through verbatim. We are permanently opted out of that code path and will not inherit future fixes to it. Practical risk is low (Azure MaaS emits unique plain IDs; our converter drops thinking blocks on replay). No action required — revisit if non-Azure models are ever routed through this provider.
+
+### Azure extensions do not inherit per-request fetch injection
+
+Pi 0.83+ added inherited per-request fetch injection for supported text and image provider transports. Both Azure extensions call `fetch()` directly inside `streamSimple` (via `lib/transient-retry.ts`), bypassing pi-ai's built-in transports. We are permanently opted out of any transport-level features pi builds on top of fetch injection (custom retry, proxy support, telemetry, etc.). The extensions already provide their own retry and auth, so the practical gap is narrow. Revisit if pi adds significant transport-level capabilities via fetch injection.
+
+### Repo/live settings drift
+
+`pi/settings.json` and `~/.pi/agent/settings.json` differ on `lastChangelogVersion`, `defaultProvider`, and `defaultModel`. This is expected — the live file tracks current usage. `install.sh` syncs `settings.json` to `~/.pi/agent/settings.json`, so a fresh `--force` install will revert the live defaults. Reconcile `pi/settings.json` if the repo should reflect current usage.
