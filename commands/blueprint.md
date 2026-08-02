@@ -11,7 +11,7 @@ Read these files before starting:
 - `docs/spec.md` — the specification (required — if missing, tell user to run `/discover` first)
 - `CLAUDE.md` — project context
 - `docs/learnings.md` — any prior learnings
-- `~/.claude/projects/-Users-arvindbattula/memory/engineering_patterns.md` — validated patterns (read if exists, use to inform phase structure)
+- `~/.claude/memory/engineering_patterns.md` — validated patterns (read if exists, use to inform phase structure)
 
 If `docs/spec.md` is empty or only has the placeholder comment, stop and tell the user to run `/discover` first.
 
