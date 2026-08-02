@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -33,9 +34,13 @@ from typing import Any, List, Dict, Tuple, Optional
 CLAUDE_DIR = Path.home() / ".claude"
 GLOBAL_MEM_DIR = CLAUDE_DIR / "memory"
 
-# Claude Code's project slug rule: absolute path with "/" → "-"
+# Claude Code's project slug rule: every non-alphanumeric character in the
+# absolute path becomes "-" (covers "/", and on Windows "\", ":", "_", ".").
+# Evidenced by actual dir names: C:\Users\x\git_projects\my-agent-config →
+# C--Users-x-git-projects-my-agent-config. Replacing only "/" made recall
+# resolve a nonexistent memory dir on Windows (empty corpus for every scope).
 def _slug(p: Path) -> str:
-    return str(p).replace("/", "-")
+    return re.sub(r"[^A-Za-z0-9-]", "-", str(p))
 
 USER_MEM_DIR = CLAUDE_DIR / "projects" / _slug(Path.home()) / "memory"
 
@@ -345,7 +350,7 @@ def load_docs_from_dir(mem_dir: Path, scope: str, manifest: Dict[str, Any]) -> L
     # Prune stale entries that used to live in this dir but no longer do
     stale = [
         k for k in list(files_map.keys())
-        if k.startswith(dir_resolved + "/") and k not in current_keys
+        if k.startswith(dir_resolved + os.sep) and k not in current_keys
     ]
     for k in stale:
         del files_map[k]
