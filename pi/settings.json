@@ -4,7 +4,7 @@
     "~/.pi/agent/extensions/azure-foundry.ts",
     "~/.pi/agent/extensions/azure-openai-models.ts"
   ],
-  "lastChangelogVersion": "0.80.10",
+  "lastChangelogVersion": "0.83.0",
   "defaultProvider": "valar",
   "defaultModel": "zai-org/GLM-5.2",
   "hideThinkingBlock": false,
