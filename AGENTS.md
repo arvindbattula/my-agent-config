@@ -9,11 +9,12 @@ Personal agent configuration — skills, commands, rules, and settings, synced a
 ./install.sh --dry-run    # Preview changes without modifying anything
 ./install.sh --force      # Sync without confirmation (for fresh machine setup)
 ./install.sh --status     # Show sync status only
+./install.sh --pi-only    # Sync pi targets only (~/.pi/agent, ~/.agents) — never touches ~/.claude
 ```
 
 ## Structure
 
-`install.sh` syncs to `~/.claude` (primary), with skills also symlinked to `~/.agents/skills` for pi and extensions copied to `~/.pi/agent/extensions`. Codex reads `AGENTS.md` directly.
+`install.sh` syncs to `~/.claude` (primary), with skills also symlinked to `~/.agents/skills` for pi and extensions copied to `~/.pi/agent/extensions`. Codex reads `AGENTS.md` directly. `--pi-only` skips every `~/.claude` write (backups included — they go to `~/.pi/agent/backups`), leaving only the pi rows below.
 
 | Dir / file | Consumed by | Notes |
 |---|---|---|

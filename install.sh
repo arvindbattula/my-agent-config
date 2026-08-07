@@ -12,12 +12,14 @@ BACKUP_DIR="$CLAUDE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
 DRY_RUN=false
 FORCE=false
 STATUS_ONLY=false
+PI_ONLY=false
 
 for arg in "$@"; do
     case "$arg" in
         --dry-run|-n) DRY_RUN=true ;;
         --force|-f) FORCE=true ;;
         --status|-s) STATUS_ONLY=true ;;
+        --pi-only|-p) PI_ONLY=true ;;
         --help|-h)
             echo "Usage: install.sh [OPTIONS]"
             echo ""
@@ -25,12 +27,18 @@ for arg in "$@"; do
             echo "  --status, -s    Show sync status only"
             echo "  --dry-run, -n   Preview changes without modifying anything"
             echo "  --force, -f     Sync without confirmation (for fresh machine setup)"
+            echo "  --pi-only, -p   Sync pi targets only (~/.pi/agent, ~/.agents); never touch ~/.claude"
             echo "  --help, -h      Show this help"
             exit 0
             ;;
         *) echo "Unknown option: $arg"; exit 1 ;;
     esac
 done
+
+# Pi-only runs must leave ~/.claude untouched, including backups.
+if $PI_ONLY; then
+    BACKUP_DIR="$HOME/.pi/agent/backups/$(date +%Y%m%d_%H%M%S)"
+fi
 
 # Colors
 RED='\033[0;31m'
@@ -483,7 +491,7 @@ sync_single_file() {
 
 echo -e "${BOLD}my-agent-config sync${NC}"
 echo -e "${GRAY}Repo:    $REPO_DIR${NC}"
-echo -e "${GRAY}Claude:  $CLAUDE_DIR${NC}"
+$PI_ONLY || echo -e "${GRAY}Claude:  $CLAUDE_DIR${NC}"
 [ -d "$HOME/.pi/agent" ] && echo -e "${GRAY}Pi ext:  $PI_EXTENSIONS${NC}"
 [ -d "$HOME/.agents" ] && echo -e "${GRAY}Pi skl:  $AGENTS_SKILLS${NC}"
 
@@ -491,80 +499,99 @@ if $DRY_RUN; then
     echo -e "${YELLOW}(dry-run mode — no changes will be made)${NC}"
 fi
 
-# Clean up renamed skill directories from previous installs
-RENAMED_SKILLS=(
-    "frontend-ui:react-engineering"
-    "visualise:diagram"
-    "deep-research:research"
-    "remove-dead-code:dead-code"
-    "security-hardening:security"
-    "triage-issue:triage"
-    "api-design:api-contracts"
-    "git-workflow:git"
-)
-
-for pair in "${RENAMED_SKILLS[@]}"; do
-    old="${pair%%:*}"
-    new="${pair##*:}"
-    old_dir="$CLAUDE_DIR/skills/$old"
-    if [ -d "$old_dir" ]; then
-        if $STATUS_ONLY; then
-            echo -e "  ${YELLOW}!${NC} $old ${GRAY}(renamed to $new, will be removed on sync)${NC}"
-        elif $DRY_RUN; then
-            echo -e "  ${YELLOW}!${NC} $old ${GRAY}→ would remove (renamed to $new)${NC}"
-        else
-            backup_file "$old_dir"
-            rm -rf "$old_dir"
-            echo -e "  ${YELLOW}!${NC} $old ${GRAY}→ removed (renamed to $new)${NC}"
-            ((actions_taken++))
-        fi
-    fi
-done
-
-# Clean up skill directories that were deleted from the repo
-REMOVED_SKILLS=(
-    "find-skills"
-    "prompt-craft"
-    "prompt-master"
-    "skill-creator"
-)
-
-for name in "${REMOVED_SKILLS[@]}"; do
-    old_dir="$CLAUDE_DIR/skills/$name"
-    if [ -d "$old_dir" ]; then
-        if $STATUS_ONLY; then
-            echo -e "  ${YELLOW}!${NC} $name ${GRAY}(removed from repo, will be deleted on sync)${NC}"
-        elif $DRY_RUN; then
-            echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ would remove (deleted from repo)${NC}"
-        else
-            backup_file "$old_dir"
-            rm -rf "$old_dir"
-            echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ removed (deleted from repo)${NC}"
-            ((actions_taken++))
-        fi
-    fi
-done
-
-# Sync each category
-sync_directories "Skills" "$REPO_DIR/skills" "$CLAUDE_DIR/skills"
-sync_files "Commands" "$REPO_DIR/commands" "$CLAUDE_DIR/commands"
-sync_files "Rules" "$REPO_DIR/rules" "$CLAUDE_DIR/rules"
-
-print_header "Config Files"
-sync_single_file "settings.json"
-sync_single_file "statusline.sh"
-
-sync_files "Hooks" "$REPO_DIR/hooks" "$CLAUDE_DIR/hooks" "*"
-# Ensure hooks are executable after sync
-if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/hooks" ]; then
-    chmod +x "$CLAUDE_DIR/hooks"/*.sh 2>/dev/null || true
+# Both pi targets are opt-in on presence, so --pi-only with neither present
+# would be a silent no-op. Say so instead of exiting 0 with an empty summary.
+if $PI_ONLY && [ ! -d "$HOME/.pi/agent" ] && [ ! -d "$HOME/.agents" ]; then
+    echo -e "${YELLOW}--pi-only: neither ~/.pi/agent nor ~/.agents exists — nothing to sync.${NC}"
+    echo -e "${GRAY}Run pi once to create ~/.pi/agent; mkdir -p ~/.agents to enable skill symlinks.${NC}"
+    exit 1
 fi
 
-sync_files "Bin" "$REPO_DIR/bin" "$CLAUDE_DIR/bin" "*"
-# Ensure bin scripts are executable after sync
-if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/bin" ]; then
-    chmod +x "$CLAUDE_DIR/bin"/* 2>/dev/null || true
-fi
+# ─── Claude Code (~/.claude) ───
+# Everything under here writes to $CLAUDE_DIR. Skipped wholesale by --pi-only so
+# a pi-only machine never grows a ~/.claude tree.
+sync_claude() {
+    $PI_ONLY && return 0
+
+    # Clean up renamed skill directories from previous installs
+    RENAMED_SKILLS=(
+        "frontend-ui:react-engineering"
+        "visualise:diagram"
+        "deep-research:research"
+        "remove-dead-code:dead-code"
+        "security-hardening:security"
+        "triage-issue:triage"
+        "api-design:api-contracts"
+        "git-workflow:git"
+    )
+
+    for pair in "${RENAMED_SKILLS[@]}"; do
+        old="${pair%%:*}"
+        new="${pair##*:}"
+        old_dir="$CLAUDE_DIR/skills/$old"
+        if [ -d "$old_dir" ]; then
+            if $STATUS_ONLY; then
+                echo -e "  ${YELLOW}!${NC} $old ${GRAY}(renamed to $new, will be removed on sync)${NC}"
+            elif $DRY_RUN; then
+                echo -e "  ${YELLOW}!${NC} $old ${GRAY}→ would remove (renamed to $new)${NC}"
+            else
+                backup_file "$old_dir"
+                rm -rf "$old_dir"
+                echo -e "  ${YELLOW}!${NC} $old ${GRAY}→ removed (renamed to $new)${NC}"
+                ((actions_taken++))
+            fi
+        fi
+    done
+
+    # Clean up skill directories that were deleted from the repo
+    REMOVED_SKILLS=(
+        "find-skills"
+        "prompt-craft"
+        "prompt-master"
+        "skill-creator"
+    )
+
+    for name in "${REMOVED_SKILLS[@]}"; do
+        old_dir="$CLAUDE_DIR/skills/$name"
+        if [ -d "$old_dir" ]; then
+            if $STATUS_ONLY; then
+                echo -e "  ${YELLOW}!${NC} $name ${GRAY}(removed from repo, will be deleted on sync)${NC}"
+            elif $DRY_RUN; then
+                echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ would remove (deleted from repo)${NC}"
+            else
+                backup_file "$old_dir"
+                rm -rf "$old_dir"
+                echo -e "  ${YELLOW}!${NC} $name ${GRAY}→ removed (deleted from repo)${NC}"
+                ((actions_taken++))
+            fi
+        fi
+    done
+
+    # Sync each category
+    sync_directories "Skills" "$REPO_DIR/skills" "$CLAUDE_DIR/skills"
+    sync_files "Commands" "$REPO_DIR/commands" "$CLAUDE_DIR/commands"
+    sync_files "Rules" "$REPO_DIR/rules" "$CLAUDE_DIR/rules"
+
+    print_header "Config Files"
+    sync_single_file "settings.json"
+    sync_single_file "statusline.sh"
+
+    sync_files "Hooks" "$REPO_DIR/hooks" "$CLAUDE_DIR/hooks" "*"
+    # Ensure hooks are executable after sync
+    if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/hooks" ]; then
+        chmod +x "$CLAUDE_DIR/hooks"/*.sh 2>/dev/null || true
+    fi
+
+    sync_files "Bin" "$REPO_DIR/bin" "$CLAUDE_DIR/bin" "*"
+    # Ensure bin scripts are executable after sync
+    if ! $DRY_RUN && ! $STATUS_ONLY && [ -d "$CLAUDE_DIR/bin" ]; then
+        chmod +x "$CLAUDE_DIR/bin"/* 2>/dev/null || true
+    fi
+
+    return 0
+}
+
+sync_claude
 
 # ─── Pi extensions (~/.pi/agent/extensions) ───
 # The Pi coding agent CLI auto-discovers extensions from ~/.pi/agent/extensions.
