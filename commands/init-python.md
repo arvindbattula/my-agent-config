@@ -10,21 +10,25 @@ Initialize a new Python uv project in the current working directory.
 Required: project name in `PascalCase` (e.g., `/init-python CommodityForecast`). If omitted, ask for it before proceeding.
 
 Derive the other forms from the PascalCase input:
-- **directory name**: `kebab-case` — insert a hyphen before each uppercase letter after the first, lowercase all (`CommodityForecast` → `commodity-forecast`)
+- **directory name**: `PascalCase` — same as input (`CommodityForecast` → `CommodityForecast`)
+- **pyproject.toml name**: `kebab-case` — insert a hyphen before each uppercase letter after the first, lowercase all (`CommodityForecast` → `commodity-forecast`)
 - **Python package name**: `snake_case` — same split, underscores (`CommodityForecast` → `commodity_forecast`)
 
 ## Steps
 
 ### Step 1: Confirm target directory
 
-- Show the user: PascalCase input, derived directory name, and derived package name.
-- If a directory already exists with the derived directory name, ask before overwriting.
+- Show the user: PascalCase directory name, derived pyproject.toml name (kebab-case), and derived Python package name (snake_case).
+- If a directory already exists with the PascalCase name, ask before overwriting.
 
 ### Step 2: Initialize with uv
 
+Create the PascalCase directory, then init inside it using the kebab-case name so `pyproject.toml` gets a valid package name:
+
 ```bash
-uv init <directory-name> --python ">=3.11"
-cd <directory-name>
+mkdir <PascalCase-name>
+cd <PascalCase-name>
+uv init . --name <kebab-case-name> --python ">=3.11"
 ```
 
 ### Step 3: Set up src layout
