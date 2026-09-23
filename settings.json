@@ -11,6 +11,17 @@
     ]
   },
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/model-router.sh",
+            "timeout": 6
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

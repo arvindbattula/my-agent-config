@@ -194,6 +194,82 @@ else
   fail "audit log written as valid JSONL"
 fi
 
+# ── model-router-lib.sh (pure sanitization helpers) ───────────────────────
+echo "model-router-lib.sh"
+source "$SCRIPT_DIR/model-router-lib.sh"
+
+[ "$(sanitize_prompt 'my key is sk-abcdefghij1234567890')" = "my key is [REDACTED_TOKEN]" ] \
+  && pass "redact sk- token" || fail "redact sk- token (got '$(sanitize_prompt 'my key is sk-abcdefghij1234567890')')"
+
+[ "$(sanitize_prompt 'reach me at foo@bar.com please')" = "reach me at [REDACTED_EMAIL] please" ] \
+  && pass "redact email" || fail "redact email (got '$(sanitize_prompt 'reach me at foo@bar.com please')')"
+
+[ "$(sanitize_prompt 'see /home/skuntumalla/secret-project/file.py for it')" = "see [REDACTED_PATH] for it" ] \
+  && pass "redact absolute path" || fail "redact absolute path (got '$(sanitize_prompt 'see /home/skuntumalla/secret-project/file.py for it')')"
+
+[ "$(sanitize_prompt 'ping 192.168.1.1 now')" = "ping [REDACTED_IP] now" ] \
+  && pass "redact IPv4" || fail "redact IPv4 (got '$(sanitize_prompt 'ping 192.168.1.1 now')')"
+
+LONG_TEXT="$(printf 'lorem ipsum dolor sit amet %.0s' $(seq 1 200))"
+TRUNCATED="$(sanitize_prompt "$LONG_TEXT")"
+[ "${#TRUNCATED}" -eq "$MODEL_ROUTER_MAX_CHARS" ] \
+  && pass "truncate to MODEL_ROUTER_MAX_CHARS" || fail "truncate to MODEL_ROUTER_MAX_CHARS (got length ${#TRUNCATED})"
+
+echo "$(build_recommendation opus 0.9)" | grep -q '/model opus' \
+  && pass "build_recommendation mentions /model <tier>" || fail "build_recommendation mentions /model <tier>"
+build_recommendation not-a-tier 0.9 >/dev/null 2>&1
+[ $? -ne 0 ] && pass "build_recommendation rejects unknown tier" || fail "build_recommendation rejects unknown tier"
+
+# ── model-router.sh (UserPromptSubmit) ────────────────────────────────────
+echo "model-router.sh"
+MR_TMP="$TMP/model-router"; mkdir -p "$MR_TMP"
+
+mr_run() { # <prompt> <session_id> [extra env assignments...]
+  local prompt="$1" session="$2"; shift 2
+  printf '{"prompt":%s,"session_id":%s}' "$(json "$prompt")" "$(json "$session")" \
+    | env "$@" TMPDIR="$MR_TMP" bash "$SCRIPT_DIR/model-router.sh"
+}
+
+OUT=$(mr_run "fix a typo" "sess-noapikey" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && [ -z "$OUT" ] \
+  && pass "fail open: no TYPESAFE_API_KEY -> exit 0, no output" \
+  || fail "fail open: no TYPESAFE_API_KEY (rc=$RC out='$OUT')"
+
+echo 'not json' | env TYPESAFE_API_KEY="x" TMPDIR="$MR_TMP" bash "$SCRIPT_DIR/model-router.sh" >/dev/null 2>&1
+[ $? -eq 0 ] && pass "fail open: unparseable payload -> exit 0" || fail "fail open: unparseable payload"
+
+OUT=$(printf '{"session_id":"sess-noprompt"}' | env TYPESAFE_API_KEY="x" TMPDIR="$MR_TMP" bash "$SCRIPT_DIR/model-router.sh" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && [ -z "$OUT" ] && pass "fail open: missing prompt field" || fail "fail open: missing prompt field (rc=$RC out='$OUT')"
+
+# Real path: mock curl so classification actually runs end-to-end.
+FAKE_BIN="$MR_TMP/fakebin"; mkdir -p "$FAKE_BIN"
+cat > "$FAKE_BIN/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+cat <<'JSON'
+{"model":"jev-1.13.0","answers":{"model_tier":{"type":"choice","choice":"opus","confidence":0.91,"probabilities":{"haiku":0.02,"sonnet":0.07,"opus":0.91}}},"usage":{"input_tokens":10,"output_tokens":5}}
+JSON
+exit 0
+FAKECURL
+chmod +x "$FAKE_BIN/curl"
+
+OUT=$(mr_run "design a multi-service migration" "sess-real" TYPESAFE_API_KEY=test-key PATH="$FAKE_BIN:$PATH" 2>&1); RC=$?
+echo "$OUT" | jq -e '.hookSpecificOutput.additionalContext | contains("opus")' >/dev/null 2>&1
+[ $? -eq 0 ] && [ "$RC" -eq 0 ] \
+  && pass "real path: mocked TypeSafe call produces opus recommendation" \
+  || fail "real path: mocked TypeSafe call (rc=$RC out='$OUT')"
+
+# Second prompt in the same session is a no-op (once-per-session gate).
+OUT=$(mr_run "another prompt" "sess-real" TYPESAFE_API_KEY=test-key PATH="$FAKE_BIN:$PATH" 2>&1); RC=$?
+[ "$RC" -eq 0 ] && [ -z "$OUT" ] \
+  && pass "once-per-session gate: second prompt in same session is a no-op" \
+  || fail "once-per-session gate (rc=$RC out='$OUT')"
+
+# A different session still classifies (gate is per-session, not global).
+OUT=$(mr_run "design a multi-service migration" "sess-real-2" TYPESAFE_API_KEY=test-key PATH="$FAKE_BIN:$PATH" 2>&1)
+echo "$OUT" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null 2>&1
+[ $? -eq 0 ] && pass "gate is per-session: new session_id classifies again" \
+  || fail "gate is per-session: new session_id classifies again (out='$OUT')"
+
 # ── summary ───────────────────────────────────────────────────────────────
 echo
 printf 'tests: %d  \033[0;32mpass %d\033[0m  \033[0;31mfail %d\033[0m\n' "$((PASS + FAIL))" "$PASS" "$FAIL"

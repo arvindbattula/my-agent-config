@@ -116,6 +116,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `session-start.sh` | SessionStart | Brief workflow reminder injected at session start |
 | `compress-memory.sh` | PostToolUse → Write | Auto-compress prose in memory files (filler removal, phrase shortening). Preserves frontmatter, code, URLs, paths. Validates before writing, restores on corruption. |
 | `design-antipattern-check.sh` | PostToolUse → Edit/Write | Detects AI design anti-patterns (Inter font, purple gradients, side-stripe borders, gradient text, #000/#fff, HSL) in frontend files and warns inline |
+| `model-router.sh` | UserPromptSubmit | Classifies the first prompt of a session via TypeSafe's Jev model and suggests a `/model` tier (haiku/sonnet/opus) via `additionalContext` for Claude to optionally relay. Warn-only — never switches models or blocks. Sends a redacted copy of the prompt (tokens, emails, paths, IPs stripped — see `model-router-lib.sh`). Requires `TYPESAFE_API_KEY`; fails open (silently, no output) if that's unset or any dependency/request step fails. |
 
 ### Config
 - `settings.json` — Permissions, hooks, extended thinking, plugins, statusline
