@@ -81,12 +81,15 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `/review-architecture` | Find architectural improvements by deepening shallow modules |
 | `/sync` | Compare repo vs local config and resolve differences |
 | `/wrap-session` | End-of-session routine. Routes session learnings (preferences, references, in-flight state) to auto-memory, `docs/state.md`, or CLAUDE.md. Review-before-write, size-capped. |
+| `/group-commit` | Split working-tree changes into logical, atomic groups; stages and proposes a commit message one group at a time. Never runs `git commit` itself. |
+| `/pr-draft` | Generate a PR description (overview, structure, summary of changes, how to run, deployment links) from the branch diff → `pr-draft.md` |
 
 ### Rules (always-on)
 | Rule | Behavior |
 |------|----------|
 | `verify-before-done` | Always verify work before declaring complete; frontend requires tests + lint + build |
 | `no-ai-slop` | No obvious comments, no unnecessary defensive checks, no aspirational comments describing unimplemented intent |
+| `no-rationale-in-docstrings` | Module docstrings describe what the code does, not the why/reasoning trail behind it; defenses move to commit messages or `docs/decisions.md` |
 | `simplicity-over-cleverness` | Simplest solution that works, no over-engineering |
 | `tdd-is-not-universal` | Gate strict test-first on spec stability, code longevity, and testable surface; build-first + verify-after when any gate fails |
 | `ask-dont-assume` | Ask on ambiguous tasks; use judgment on minor reversible decisions |
@@ -103,6 +106,9 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `path-containment-after-regex` | Pair regex path gates with segment check + post-resolve containment (and realpath for symlink threats) |
 | `no-unsourced-claims` | Never invent stats; tag quantitative claims as sourced/estimate/opinion; don't smuggle opinions as facts |
 | `skill-completion-receipt` | For 2+ step skills/commands, print a per-step receipt (✓/✗/N/A) before claiming done |
+| `maintain-readme` | Keep README.md current after structural changes (new modules, changed run instructions); defines the Overview/Structure/How-to-Run format to maintain |
+| `no-autocommit-in-auto-mode` | Never `git commit` without an explicit ask in the current exchange, even under Auto Mode — committing is a separate decision from proceeding |
+| `prune-dead-docs` | When a feature/module is removed, prune dead references in code, current-state docs, and on-disk artifacts; leave `docs/decisions.md` history untouched |
 
 ### Hooks
 | Hook | Trigger | Purpose |
