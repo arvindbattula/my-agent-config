@@ -69,6 +69,20 @@ Generate a project-level CLAUDE.md with this structure:
 ## Build / Run / Test
 <!-- Updated as commands become known -->
 
+## Visualization / Plotting Style
+
+- **Stack**: `matplotlib.pyplot` + `seaborn`, with `sns.set_style("whitegrid")`.
+- **Layout**: use small multiples (one subplot per category) over a single crowded axes. Prefer a layout where every subplot sits in the bottom row rather than a grid with unused/empty panels — an empty panel can hide tick labels on the panel sharing its column.
+- **Category order**: pick an explicit, meaningful order for categorical variables (e.g. domain-natural order) rather than relying on alphabetical or default ordering.
+- **Color mapping**: use a fixed, reused color-per-category mapping (a dict), not auto-cycled colors — so the same category always gets the same color across plots. When a series is a forecast/extrapolation of another series, plot it in that same color but with a dashed line style, rather than introducing a new color.
+- **Axes**:
+  - Format numeric axes for their unit (e.g. currency formatting for monetary values) rather than leaving raw numbers.
+  - Fix the tick count across panels (e.g. `MaxNLocator(nbins=...)`) so panels on very different scales still show comparable grid density.
+  - For date axes, truncate/abbreviate labels and thin the tick interval so labels stay legible, center-align tick labels, and make sure every panel shows its own axis.
+- **Titles/labels**: use a figure-level title (`suptitle`) for the overall chart and a per-axes title for each panel's category; don't title legends.
+- **Sizing**: scale `figsize` by the number of panels so panel size stays consistent as panel count changes.
+- Always finish a plotting cell with a tight/constrained layout call before displaying.
+
 ## Project Rules
 <!-- Accumulated over time -->
 ```
