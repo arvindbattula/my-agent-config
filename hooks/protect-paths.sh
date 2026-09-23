@@ -106,6 +106,9 @@ CWD_ABS=$(cd "$CWD" 2>/dev/null && pwd 2>/dev/null || echo "$CWD")
 #     one's — accepted, it is ephemeral temp data.
 #   ~/.claude/plans/*               plan-mode files
 #   ~/.claude/projects/*/memory/*   auto-memory
+#   ~/my-agent-config/*             user's own dotfiles/config repo, source
+#     of truth synced into ~/.claude/ by install.sh -- editing it directly
+#     is the intended workflow, not an escape from the project root
 # The rest of ~/.claude (settings.json, hooks) stays protected.
 outside_root_exempt() {
   local tmp_cand tmp_root home_abs
@@ -121,6 +124,7 @@ outside_root_exempt() {
   case "$NORMALIZED" in
     "$home_abs"/.claude/plans/*) return 0 ;;
     "$home_abs"/.claude/projects/*/memory/*) return 0 ;;
+    "$home_abs"/my-agent-config/*) return 0 ;;
   esac
   return 1
 }
