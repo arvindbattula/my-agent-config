@@ -1,21 +1,31 @@
 {
   "theme": "light",
-  "extensions": [
-    "~/.pi/agent/extensions/azure-foundry.ts",
-    "~/.pi/agent/extensions/azure-openai-models.ts"
-  ],
-  "lastChangelogVersion": "0.83.0",
+  "extensions": [],
+  "lastChangelogVersion": "0.87.1",
   "defaultProvider": "valar",
-  "defaultModel": "zai-org/GLM-5.2",
-  "hideThinkingBlock": false,
+  "defaultModel": "moonshotai/Kimi-K3",
+  "hideThinkingBlock": true,
   "defaultThinkingLevel": "high",
   "retry": {
-    "enabled": false
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000
   },
   "compaction": {
     "reserveTokens": 32768
   },
   "packages": [
-    "npm:@luxusai/pi-hindsight"
+    "npm:@mnemosyne-oss/pi-mnemosyne",
+    "npm:@juicesharp/rpiv-ask-user-question",
+    "npm:pi-subagents",
+    "npm:@tmustier/pi-session-recap"
+  ],
+  "enableSkillCommands": true,
+  "enabledModels": [
+    "valar/moonshotai/Kimi-K3-fast",
+    "valar/qwen/qwen3.8-max",
+    "valar/zai-org/GLM-5.3",
+    "azure-claude/claude-opus-5",
+    "azure-claude/claude-sonnet-5"
   ]
 }

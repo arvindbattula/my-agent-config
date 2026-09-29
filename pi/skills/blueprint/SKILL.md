@@ -1,0 +1,165 @@
+---
+name: "blueprint"
+description: "Break the project spec into a phased build plan"
+disable-model-invocation: true
+---
+
+Break the project specification into a phased, ordered build plan. Each phase is small enough to complete and verify in one session.
+
+## Prerequisites
+
+Read these files before starting:
+- `docs/spec.md` — the specification (required — if missing, tell user to run `/skill:discover` first)
+- `AGENTS.md` (or project-level `CLAUDE.md`, whichever this project uses) — project context
+- `docs/learnings.md` — any prior learnings
+- <!-- TODO: Claude Code source referenced `~/.claude/memory/engineering_patterns.md`. No confirmed Pi equivalent path — check whether `@mnemosyne-oss/pi-mnemosyne` (enabled in settings.json) exposes an analogous validated-patterns memory before wiring this in. -->
+
+If `docs/spec.md` is empty or only has the placeholder comment, stop and tell the user to run `/skill:discover` first.
+
+## Process
+
+### Orientation
+
+Before analyzing the spec, check what already exists:
+
+```bash
+# Does any code already exist? (resuming a project vs. greenfield)
+find . -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.py" | grep -v node_modules | head -20
+
+# Is there already a partial plan?
+cat docs/plan.md 2>/dev/null | head -5
+```
+
+If code already exists, the plan should account for what's built vs. what's new.
+
+### Step 1: Analyze the spec
+
+Read the spec and identify:
+- The core functionality (what MUST work for this to be useful)
+- The natural build order (what depends on what)
+- Where the thin vertical slice is (the simplest end-to-end path)
+
+### Step 2: Propose phases
+
+Present a phased breakdown to the user. Follow these principles:
+
+- **Phase 1 is always the thinnest vertical slice.** End-to-end, but minimal. The user should be able to run it and see something work.
+- **Each phase produces something runnable or testable.** No "setup only" phases — every phase should have a visible outcome.
+- **Phases are ordered by dependency, then value.** Build what's needed first, then what's most valuable.
+- **Each phase is completable in one session.** If a phase feels too big, split it.
+- **The last phase is always "polish & harden."** Edge cases, error handling, performance, cleanup.
+
+For each phase, specify:
+
+```markdown
+## Phase N: [Short Name]
+**Build:** (what gets created or changed — be specific about files/components)
+**Verify:** (how to confirm it works — specific steps the user can take)
+**Test:** (what tests to write, if applicable)
+**Done when:** (explicit, observable completion criteria)
+```
+
+### Step 3: Cross-phase integration check
+
+Before presenting the plan, stress-test it silently. Ask yourself: **"If I built each phase knowing only its own description and the outputs of prior phases, would the phases fit together?"**
+
+Check for:
+1. Does any phase assume something exists that no prior phase creates?
+2. Are there unstated data format assumptions? (Phase 2 expects JSON, Phase 1 outputs CSV)
+3. Are there naming or interface assumptions? (Phase 3 calls a function Phase 2 should create, but the name/signature isn't specified in either phase)
+4. Does any phase's "Done when" criteria conflict with a later phase's assumptions?
+
+If issues found, fix the plan silently and note what you caught when presenting to the user. If the plan is clean, move on — no announcement needed.
+
+### Step 4: Map dependencies
+
+After the phases, add a dependencies section:
+- Which phases depend on which
+- Which phases could theoretically be done in parallel
+
+### Step 5: User review
+
+Present the full plan. Ask the user:
+- "Does this order make sense?"
+- "Is any phase too big or too small?"
+- "Anything missing?"
+
+Adjust based on feedback.
+
+### Step 6: Write the plan
+
+Write the approved plan to `docs/plan.md` using this format:
+
+```markdown
+# [Project Name] — Build Plan
+
+Generated from: docs/spec.md
+Date: [today's date]
+
+## Phase 1: [Name] — Vertical Slice
+**Build:** ...
+**Verify:** ...
+**Test:** ...
+**Done when:** ...
+**Status:** [ ] Not started
+
+## Phase 2: [Name]
+**Build:** ...
+**Verify:** ...
+**Test:** ...
+**Done when:** ...
+**Status:** [ ] Not started
+
+...
+
+## Phase N: Polish & Harden
+**Build:** ...
+**Verify:** ...
+**Test:** ...
+**Done when:** ...
+**Status:** [ ] Not started
+
+## Dependencies
+- Phase 2 depends on Phase 1
+- Phase 3 and 4 can run in parallel after Phase 2
+- ...
+```
+
+### Step 7: Suggest next step
+
+Tell the user: "Run `/skill:construct` to start building Phase 1."
+
+## Planning Principles
+
+- **Vertical over horizontal.** Don't plan "set up the database" then "build the API" then "build the UI." Plan "user can do X end-to-end" then "user can also do Y."
+- **Name the risks.** If a phase has technical uncertainty, flag it: "This phase depends on [API/library] working as expected. If it doesn't, we may need to revisit."
+- **Respect the spec boundaries.** Don't plan features that are listed as out-of-scope in the spec.
+- **Keep it concrete.** "Build the dashboard" is too vague. "Create index.html with a table showing tab data grouped by topic" is specific enough to build from.
+
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "These phases are obvious" | Write them down anyway. Explicit phases surface hidden dependencies and forgotten edge cases. |
+| "Phase 1 should set up infrastructure first" | Phase 1 is always the thinnest vertical slice. No "setup only" phases — every phase has a visible outcome. |
+| "This project is too small to need phases" | Even small projects benefit from a visible completion sequence and explicit "Done when" criteria. |
+| "I can figure out the order as I go" | Implementation order follows the dependency graph. Discovering a missing dependency mid-build wastes the session. |
+| "Planning is overhead" | Planning is the task. Implementation without a plan is just typing. |
+
+## Red Flags
+
+- All phases are XL-sized (too big for one session)
+- No "Done when" criteria on any phase
+- Phase 1 is "setup and configuration" instead of a vertical slice
+- Dependency order not considered
+- No cross-phase integration check performed
+- Phases that assume something exists that no prior phase creates
+
+## Performance Notes
+<!-- Updated by /skill:retro. Do not edit manually. -->
+<!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->
+- 2026-04-18 [Project A]: Multi-phase structure held up through ship; parallel phases worked as planned. But the final "Polish & Harden" phase absorbed far more late-discovered work than scoped — settings registry, chunking, background processing, retention. The organic split into sub-phases was correct; consider explicitly budgeting a "harden & tune" phase as 2-3 sub-phases rather than one (evidence: project plan docs)
+- 2026-04-18 [Project A]: "Report template design deferred to build phase" was the right call — the report format evolved multiple times after shipping. Blueprint should explicitly tag deliverables likely to iterate post-ship, not present a single "Done when" for them (evidence: project decision docs)
+- 2026-04-18 [Project A]: Plan-is-spec lesson: dashboard read-model endpoints were added during blueprint review after they were missed in spec. Catching this in blueprint saved a rewrite. The pattern: when the spec talks about UI views, the blueprint must explicitly design the server endpoints that back them — not assume "frontend will aggregate from primitives" (evidence: project learnings docs)
+- 2026-07-14 [Project C]: The plan held up, but a whole hardening block (bounded concurrency + pre-filter) had to be INSERTED mid-build — all forced by the LLM's real per-call latency and first-run volume not being modeled at plan time. When the pipeline makes an expensive EXTERNAL per-item call at scale, blueprint should explicitly budget an operational-hardening phase (concurrency, incremental persistence, rate-limits, CI-time-fit) and capture the max-run-time estimate up front. 2nd instance of "harden phase absorbs more than scoped" (evidence: project plan + learnings docs)
+- 2026-07-17 [Project C]: Phase acceptance criteria that demanded LIVE-DATA verification caught real bugs; criteria that only said 'tests pass' let decorative tests through multiple review rounds. Prefer acceptance criteria stated as observable end-to-end behavior on real data. (evidence: project plan review history)

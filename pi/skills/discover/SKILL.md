@@ -1,0 +1,225 @@
+---
+name: "discover"
+description: "Structured product discovery interview"
+disable-model-invocation: true
+---
+
+Structured product discovery interview. Guides the user from a fuzzy idea to a complete specification written to `docs/spec.md`. The agent leads the interview, does the writing, surfaces unknowns. The user answers questions and makes decisions.
+
+**This is NOT the same as Pi's `grilling`/`grill-with-docs` skills.** Those are general-purpose stress-testing of an existing plan or idea. Discover is a structured product definition process with layered interview phases and a persisted spec output — run it earlier, before there's a plan to grill.
+
+## Before Starting
+
+Ask the user for a one-line description of the idea first.
+
+<!-- TODO: Claude Code source ran `~/.claude/bin/recall "<idea>" --budget 2500` here to surface
+     discovery-blind-spots.md / engineering_patterns.md entries and prior project memory. No
+     confirmed Pi-side equivalent CLI — `@mnemosyne-oss/pi-mnemosyne` is enabled in settings.json
+     and may expose something similar, but verify its actual interface before wiring this in
+     rather than assuming a matching command exists. Until then, skip the recall step. -->
+
+## Process
+
+### Step 1: Determine project size
+
+Ask the user: **"Before we dive in — how big is this project?"**
+
+Offer three options with examples:
+- **Quick script** — one-off utility, data transform, CLI tool, automation
+- **Small tool** — single-file app, personal dashboard, API wrapper, browser extension
+- **Full product** — multi-file app, team-facing tool, public product, something that will grow
+
+This determines interview depth:
+
+| Size | Interview Layers | Spec Sections |
+|---|---|---|
+| Quick script | Layers 1-2 | Problem, Scope, Technical Decisions |
+| Small tool | Layers 1-3 | Above + User Flows, Data Model |
+| Full product | Layers 1-6 | Full spec |
+
+### Step 2: Run the interview
+
+Work through the layers one at a time. For each layer, ask 2-4 focused questions. Do NOT dump all questions at once — this is a conversation, not a form. Push for specifics. Don't accept vague answers.
+
+**Layer 1: Intent & Context**
+- What is this? Describe it in one sentence.
+- Who is it for? (You personally? Your team? External users?)
+- What problem does it solve? What's painful about the current way?
+- What does success look like? How will you know this is working?
+
+**Layer 2: Scope & Boundaries**
+- What's the MVP — the absolute smallest thing that would be useful?
+- What's explicitly OUT of scope for now? (Force the user to name things they won't build yet.)
+- What are the 2-3 features that make this worth building vs. using an existing tool?
+
+**Layer 3: User Experience** *(skip for quick scripts)*
+- Walk through the primary user flow step by step: what does the user see first? What do they do? What happens next?
+- What are the key interactions? What data goes in, what comes out?
+- Are there secondary flows? (Settings, error states, onboarding, edge cases)
+
+**Layer 4: System Thinking** *(full product only)*
+This is the "unknown unknowns" layer. Actively surface risks the user hasn't considered:
+- Where does the data come from? Where does it go? What's the data lifecycle?
+- What are the external dependencies? (APIs, services, files, databases)
+- What happens when things go wrong? (Network down, bad input, API rate limits, partial failures)
+- Performance/scale: how much data? How many users? What needs to be fast?
+- Security/privacy: who can access this? Any sensitive data? Auth needed?
+
+**Layer 5: Technical Shape** *(full product only)*
+- What technologies/frameworks? (If user isn't sure, recommend based on the requirements and user's experience.)
+- How will this run? (Local, server, cloud, static file, desktop app?)
+- What existing code or patterns should this build on?
+- What's the deployment/distribution story?
+
+**Layer 6: Risks & Open Questions** *(full product only)*
+Synthesize everything heard so far and surface:
+- "Based on what you've told me, here are the things I think could go wrong..."
+- "Here are decisions we haven't made yet..."
+- "These assumptions feel risky to me because..."
+
+The user addresses each one: resolve it, defer it explicitly, or ask for a recommendation.
+
+### Step 3: Write the spec
+
+After the interview, write `docs/spec.md`. Use this format, but ONLY include sections relevant to the project size:
+
+```markdown
+# [Project Name] — Specification
+
+## Problem & Intent
+(why this exists, what pain it solves)
+
+## Users & Context
+(who uses it, when, how, what they do today)
+
+## MVP Scope
+(what we're building first)
+### Out of Scope
+(what we're explicitly NOT building yet)
+
+## Requirements (EARS format)
+Write each requirement using EARS (Easy Approach to Requirements Syntax) patterns.
+This makes requirements unambiguous and directly testable.
+
+**Patterns:**
+- **Ubiquitous:** The system shall [action]
+- **Event-driven:** When [event], the system shall [action]
+- **State-driven:** While [state], the system shall [action]
+- **Unwanted behavior:** If [condition], then the system shall [action]
+- **Optional:** Where [feature is enabled], the system shall [action]
+
+Example:
+- When the user clicks "Export," the system shall generate a JSON file containing all library entries.
+- If the API returns a 429 status, then the system shall retry after the Retry-After interval.
+- While offline, the system shall queue data sync requests until connectivity is restored.
+
+Group requirements by feature area. Each requirement should be one testable statement.
+
+**For operations (API endpoints, CLI commands, data transformations),** additionally specify inputs, outputs, and failure modes for each requirement:
+
+```
+### [Operation Name]
+[EARS requirement sentence]
+**Accepts:** [input description — types, constraints, optionality]
+**Returns:** [output description]
+**Errors:**
+- [condition] → [behavior]
+```
+
+Example:
+```
+### Add Expense
+When the user runs `add`, the system shall create an expense record and persist it.
+**Accepts:** amount (positive number), category (non-empty string), description (optional string)
+**Returns:** The created expense record with its assigned ID
+**Errors:**
+- Amount is zero or negative → exit with error message and code 1
+- Category is empty → exit with error message and code 1
+```
+
+Use this structured format for operations. Use plain EARS for behavioral/state requirements that don't have clear inputs/outputs.
+
+## User Flows
+(step-by-step primary flows — skip for quick scripts)
+
+## Data Model
+(what data exists, where it lives, how it flows — skip for quick scripts)
+
+## External Dependencies
+(APIs, services, files — only if they exist)
+
+## Technical Decisions
+(language, framework, architecture — with rationale for each choice)
+
+## Boundaries
+- **Always:** [things the agent must always do — run tests before commits, validate inputs, follow naming conventions]
+- **Ask first:** [things requiring approval — DB schema changes, adding dependencies, changing CI config]
+- **Never:** [hard prohibitions — commit secrets, edit vendor dirs, remove failing tests without approval]
+
+(Feeds directly into `CLAUDE.md`/`AGENTS.md`. Skip for quick scripts.)
+
+## Edge Cases & Error Handling
+(what can go wrong, how we handle it — full product only)
+
+## Open Questions
+(unresolved items — revisit before or during build)
+```
+
+### Step 4: Spec self-audit
+
+Before finalizing, re-read the spec adversarially. Check for:
+
+1. **Contradictions** — Does requirement A conflict with requirement B?
+2. **Missing error cases** — Are there operations without failure modes defined?
+3. **Ambiguous terms** — Is the same word used to mean different things? (e.g., "user" = end user vs admin)
+4. **Implicit dependencies** — Does feature A clearly need feature B, but the spec doesn't say so?
+5. **Blocking open questions** — For each item in Open Questions: does it block building, or can we safely defer it?
+
+If issues found, present them to the user with proposed fixes. Update the spec after approval. Keep this lightweight — a quick pass, not a formal report. If the spec is clean, say so and move on.
+
+### Step 5: Update project context file
+
+Update the "What This Is" section of the project's `CLAUDE.md` (or `AGENTS.md`) with a 1-2 sentence project summary derived from the spec.
+
+### Step 6: Confirm and suggest next step
+
+Present a summary of the spec to the user. Ask them to review and flag anything wrong.
+
+Then suggest: "When you're happy with the spec, run `/skill:blueprint` to create the phased build plan."
+
+## Interview Principles
+
+- **One layer at a time.** Don't skip ahead. Each layer builds on previous answers.
+- **Push for specifics.** "It should be fast" → "What's the latency budget? Under 1 second? Under 100ms?"
+- **Surface tradeoffs.** "You said X and Y — those are in tension. Which matters more?"
+- **Name the unknowns.** If the user says "I'm not sure," that's fine — capture it as an open question in the spec rather than guessing.
+- **Recommend when asked.** If the user wants your opinion on tech choices, give an opinionated recommendation with rationale, not a list of options.
+- **Don't over-spec quick scripts.** A utility script needs 10 lines of spec, not 2 pages.
+- **Reframe vague requirements as success criteria.** "Make it fast" → "Dashboard LCP < 2.5s on 4G, initial data load < 500ms, CLS < 0.1. Are these the right targets?"
+
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "The user knows what they want, I don't need to probe" | Even clear requests have implicit assumptions. The interview surfaces them. |
+| "This is a quick script, skip the interview" | Quick scripts still need scope boundaries. A 2-min interview prevents scope creep. |
+| "I'll figure out requirements during build" | That's how you get mid-build spec reconciliations that derail the session. |
+| "The spec will slow us down" | A 15-minute spec prevents hours of rework. |
+| "Requirements will change anyway" | That's why the spec is a living document. An outdated spec is still better than no spec. |
+
+## Red Flags
+
+- Starting to write code without any written requirements
+- Implementing features not mentioned in any spec
+- "Should I just start building?" before clarifying what "done" means
+- Accepting vague answers without pushing for specifics ("it should be fast" → what's the latency budget?)
+- Skipping layers for a full product because "we already know what we want"
+
+## Performance Notes
+<!-- Updated by /skill:retro. Do not edit manually. -->
+<!-- Format: - YYYY-MM-DD [project]: observation (evidence: source) -->
+- 2026-04-18 [Project A]: "Unit of LLM extraction" (message vs thread vs document) wasn't probed. Shipped per-message early; redesigned to thread-level later for topic coherence, requiring dual-write migration across many queries (evidence: project learnings docs)
+- 2026-04-18 [Project A]: Discovery committed to one LLM provider. A second provider (embeddings) surfaced during canonicalization, adding new env var, fallback logic, and divergent error handling. Probe for specialty capabilities (embeddings/OCR/TTS) upfront (evidence: project decision docs)
+- 2026-04-18 [Project A]: Graph model cardinality (simple Graph vs MultiGraph) wasn't surfaced. Silent edge collapse forced rewrite of all edge access patterns. Any "same pair, multiple relationship types" question should be asked in Layer 4 data modeling (evidence: project decision docs)
+- 2026-04-18 [Project A]: Startup work blocking serving wasn't flagged. Long-running processing in FastAPI lifespan made the server unresponsive for minutes with a backlog. Later moved to daemon thread. Ask: "Can the server yield before long-running startup work completes?" (evidence: project learnings docs)
+- 2026-04-18 [Project A]: Runtime-configurable constants were discovered late. Many hardcoded values became a settings registry. If more than a handful of constants need post-ship tuning, plan the registry from Phase 1 (evidence: project decision docs)
