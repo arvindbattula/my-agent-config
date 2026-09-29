@@ -5,8 +5,45 @@ set -uo pipefail
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 AGENTS_SKILLS="$HOME/.agents/skills"
-PI_EXTENSIONS="$HOME/.pi/agent/extensions"
+PI_DIR="$HOME/.pi/agent"
+PI_EXTENSIONS="$PI_DIR/extensions"
+PI_SKILLS="$PI_DIR/skills"
+CODEX_DIR="$HOME/.codex"
+CODEX_SKILLS="$CODEX_DIR/skills"
 BACKUP_DIR="$CLAUDE_DIR/backups/$(date +%Y%m%d_%H%M%S)"
+
+# ─── Pi config boundaries ───
+# Files pi config lives in. Includes .mjs/.mts so the extension test suites
+# sync with the code they cover — omitting them let the suites drift for a
+# month while install.sh reported the extensions as identical.
+PI_FILE_TYPES=('-name' '*.ts' -o -name '*.mts' -o -name '*.mjs' -o -name '*.md' -o -name '*.json')
+
+# Live-only, gitignored. Mirrors the pi/extensions block in .gitignore.
+PI_LOCAL_ONLY_EXTENSIONS="azure-foundry-models.json valar-dynamic.ts herdr-agent-state.ts"
+
+# Matt Pocock upstream skills, fetched separately rather than vendored. Mirrors
+# the `# Pi skills — Matt Pocock upstream` block in .gitignore. `reports` and
+# .hook-state are runtime state the extensions write into the skills dir.
+PI_UPSTREAM_SKILLS="ask-matt code-review codebase-design diagnosing-bugs domain-modeling grill-with-docs grilling handoff implement prototype resolving-merge-conflicts setup-matt-pocock-skills tdd teach to-questionnaire to-spec to-tickets triage wait-what wayfinder wizard writing-for-agents"
+PI_SKILL_EXCLUDES="reports .hook-state $PI_UPSTREAM_SKILLS"
+
+# Codex owns its system skills under this directory. Keep those managed skills
+# out of the user-config sync while adding the repo's portable skills alongside
+# them.
+CODEX_SKILL_EXCLUDES=".system"
+
+# settings.json keys a repo → local copy may not change without an explicit
+# override. retry has been clobbered off twice by these syncs; with it off,
+# transient blips to api.valarhq.ai surface as "Error: Connection error."
+# See pi/extensions/README.md → "Valar retry". Reading the keys needs node, which
+# pi requires anyway; without it the guard is inert and files compare raw.
+PROTECTED_SETTINGS_KEYS="retry"
+
+# settings.json keys pi rewrites on its own. Stripped before comparing so a pi
+# upgrade does not report the file as drifted.
+VOLATILE_SETTINGS_KEYS="lastChangelogVersion"
+
+JSON_TOOL="$(command -v node || true)"
 
 # Flags
 DRY_RUN=false
@@ -103,6 +140,126 @@ backup_file() {
     fi
 }
 
+# True when $1 is one of the space-separated names in $2.
+excluded() {
+    case " ${2:-} " in
+        *" $1 "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Print a top-level JSON key as compact JSON. Empty when the key is absent;
+# non-zero when node is missing or the file is absent/unparsable.
+json_key() {
+    local file="$1" key="$2"
+    [ -n "$JSON_TOOL" ] || return 1
+    [ -f "$file" ] || return 1
+    "$JSON_TOOL" -e '
+        const fs = require("node:fs");
+        let o;
+        try { o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(1); }
+        const v = o[process.argv[2]];
+        process.stdout.write(v === undefined ? "" : JSON.stringify(v));
+    ' "$file" "$key" 2>/dev/null
+}
+
+# Re-serialize a JSON config with VOLATILE_SETTINGS_KEYS removed and keys sorted at
+# every level, so formatting and key order do not read as drift. Sorting must be
+# recursive: JSON.stringify's array replacer filters properties at all depths,
+# which would flatten nested objects like retry to {} and hide real differences.
+json_strip_volatile() {
+    local file="$1"
+    [ -n "$JSON_TOOL" ] || return 1
+    [ -f "$file" ] || return 1
+    VOLATILE_KEYS="$VOLATILE_SETTINGS_KEYS" "$JSON_TOOL" -e '
+        const fs = require("node:fs");
+        let o;
+        try { o = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(1); }
+        const drop = (process.env.VOLATILE_KEYS || "").split(/[ ,]+/).filter(Boolean);
+        for (const k of drop) delete o[k];
+        const stable = (v) => {
+            if (Array.isArray(v)) return v.map(stable);
+            if (v && typeof v === "object") {
+                const out = {};
+                for (const k of Object.keys(v).sort()) out[k] = stable(v[k]);
+                return out;
+            }
+            return v;
+        };
+        process.stdout.write(JSON.stringify(stable(o), null, 2));
+    ' "$file" 2>/dev/null
+}
+
+# compare_file, but for a JSON config whose own volatile keys do not count as a
+# difference. Falls back to compare_file when node is absent or a file is
+# missing/unparsable.
+compare_json_normalized() {
+    local a="$1" b="$2" na nb
+    if [ ! -f "$a" ] || [ ! -f "$b" ]; then
+        compare_file "$a" "$b"
+        return
+    fi
+    if [ -z "$JSON_TOOL" ] || ! na=$(json_strip_volatile "$a") || [ -z "$na" ] \
+        || ! nb=$(json_strip_volatile "$b") || [ -z "$nb" ]; then
+        compare_file "$a" "$b"
+        return
+    fi
+    [ "$na" = "$nb" ] && echo "identical" || echo "differs"
+}
+
+# True when copying $1 (repo) over $2 (live) would change a protected key.
+copy_would_clobber_protected() {
+    local repo_file="$1" live_file="$2" key repo_val live_val
+    [ -n "$JSON_TOOL" ] || return 1
+    for key in $PROTECTED_SETTINGS_KEYS; do
+        repo_val=$(json_key "$repo_file" "$key") || continue
+        live_val=$(json_key "$live_file" "$key") || continue
+        [ "$live_val" != "$repo_val" ] && return 0
+    done
+    return 1
+}
+
+# Show live vs incoming values for the protected keys that differ.
+show_protected_diff() {
+    local repo_file="$1" live_file="$2" key repo_val live_val
+    for key in $PROTECTED_SETTINGS_KEYS; do
+        repo_val=$(json_key "$repo_file" "$key") || repo_val=""
+        live_val=$(json_key "$live_file" "$key") || live_val=""
+        [ "$live_val" = "$repo_val" ] && continue
+        echo -e "    ${RED}protected key: ${BOLD}$key${NC}"
+        echo -e "      ${GRAY}live:    ${NC}${live_val:-<absent>}"
+        echo -e "      ${GRAY}in repo: ${NC}${repo_val:-<absent>}"
+    done
+}
+
+# Copy a repo pi config file over the live one, honouring protected keys.
+# $3 "override" skips the refusal check; nothing sets that automatically —
+# --force does not bypass it. Echoes the action taken.
+install_repo_over_live_config() {
+    local repo_file="$1" live_file="$2" mode="${3:-}"
+    if copy_would_clobber_protected "$repo_file" "$live_file"; then
+        show_protected_diff "$repo_file" "$live_file"
+        if [ "$mode" != "override" ]; then
+            if $DRY_RUN; then
+                echo -e "    ${RED}✗ would refuse${NC} ${GRAY}(protected key differs; dry-run does not prompt)${NC}"
+                return 1
+            fi
+            read -p "    [o]verride live with the repo value / [s]kip? " choice3
+            case "$choice3" in
+                o|O) mode="override" ;;
+                *) echo -e "    ${GRAY}→ skipped (protected key)${NC}"; return 1 ;;
+            esac
+        fi
+    fi
+    if ! $DRY_RUN; then
+        backup_file "$live_file"
+        cp "$repo_file" "$live_file"
+        ((actions_taken++))
+    fi
+    echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
+    return 0
+}
+
 print_header() {
     echo ""
     echo -e "${BOLD}$1${NC}"
@@ -146,23 +303,36 @@ sync_directories() {
     local type_name="$1"
     local repo_path="$2"
     local local_path="$3"
+    local excludes="${4:-}"
 
     print_header "$type_name"
 
-    # Collect all names from both locations
-    local all_names=()
+    # Collect all names from both locations, skipping the excluded ones.
+    # Exclusions carry the upstream skills and runtime-state dirs that live
+    # locally but are deliberately not vendored (PI_SKILL_EXCLUDES).
+    local all_names=() skipped=()
     [ -d "$repo_path" ] && for d in "$repo_path"/*/; do
-        [ -d "$d" ] && all_names+=("$(basename "$d")")
+        [ -d "$d" ] || continue
+        name="$(basename "$d")"
+        if excluded "$name" "$excludes"; then
+            [[ " ${skipped[*]:-} " =~ " $name " ]] || skipped+=("$name")
+            continue
+        fi
+        all_names+=("$name")
     done
     [ -d "$local_path" ] && for d in "$local_path"/*/; do
-        [ -d "$d" ] && {
-            name="$(basename "$d")"
-            # Add only if not already in list
-            if [[ ! " ${all_names[*]:-} " =~ " $name " ]]; then
-                all_names+=("$name")
-            fi
-        }
+        [ -d "$d" ] || continue
+        name="$(basename "$d")"
+        if excluded "$name" "$excludes"; then
+            [[ " ${skipped[*]:-} " =~ " $name " ]] || skipped+=("$name")
+            continue
+        fi
+        # Add only if not already in list
+        if [[ ! " ${all_names[*]:-} " =~ " $name " ]]; then
+            all_names+=("$name")
+        fi
     done
+    [ ${#skipped[@]} -gt 0 ] && echo -e "  ${GRAY}(${#skipped[@]} excluded from sync — upstream skills and runtime state)${NC}"
 
     # Sort names
     IFS=$'\n' sorted=($(sort <<<"${all_names[*]}")); unset IFS
@@ -252,6 +422,7 @@ sync_directories() {
                     action=$(ask_action "$name" "local_only")
                     if [ "$action" = "to_repo" ]; then
                         if ! $DRY_RUN; then
+                            mkdir -p "$repo_path"
                             cp -r "$l" "$r"
                             ((actions_taken++))
                         fi
@@ -484,8 +655,9 @@ sync_single_file() {
 echo -e "${BOLD}my-agent-config sync${NC}"
 echo -e "${GRAY}Repo:    $REPO_DIR${NC}"
 echo -e "${GRAY}Claude:  $CLAUDE_DIR${NC}"
-[ -d "$HOME/.pi/agent" ] && echo -e "${GRAY}Pi ext:  $PI_EXTENSIONS${NC}"
+[ -d "$PI_DIR" ] && echo -e "${GRAY}Pi dir:  $PI_DIR${NC}"
 [ -d "$HOME/.agents" ] && echo -e "${GRAY}Pi skl:  $AGENTS_SKILLS${NC}"
+[ -d "$CODEX_DIR" ] && echo -e "${GRAY}Codex:   $CODEX_DIR${NC}"
 
 if $DRY_RUN; then
     echo -e "${YELLOW}(dry-run mode — no changes will be made)${NC}"
@@ -586,19 +758,24 @@ sync_pi_extensions() {
     # README.md stay in sync instead of silently drifting (they are not runtime
     # code, but they are the audit trail for deliberate upstream divergences).
     #
-    # Exclude runtime caches (gitignored, auto-generated) from sync candidates.
-    # azure-foundry-models.json refreshes its lastUpdated timestamp on every
-    # Azure ARM discovery, so it would show as "differs" on every run — false
-    # noise and a risk of accidentally syncing a machine-specific cache.
+    # Skip the live-only files in PI_LOCAL_ONLY_EXTENSIONS. They are gitignored
+    # by design: azure-foundry-models.json is a runtime cache that rewrites its
+    # lastUpdated stamp on every ARM discovery (permanent "differs" noise, and a
+    # machine-specific model set), valar-dynamic.ts is a personal provider shim,
+    # and herdr-agent-state.ts is overwritten by the Herdr integration.
     local names=()
     while IFS= read -r f; do
-        [ -n "$f" ] && names+=("${f#"$REPO_DIR"/pi/extensions/}")
-    done < <(find "$REPO_DIR/pi/extensions" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' \) -not -name 'azure-foundry-models.json')
+        [ -n "$f" ] || continue
+        local n; n="${f#"$REPO_DIR"/pi/extensions/}"
+        excluded "$n" "$PI_LOCAL_ONLY_EXTENSIONS" && continue
+        names+=("$n")
+    done < <(find "$REPO_DIR/pi/extensions" -type f \( "${PI_FILE_TYPES[@]}" \))
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         local n; n="${f#"$PI_EXTENSIONS"/}"
+        excluded "$n" "$PI_LOCAL_ONLY_EXTENSIONS" && continue
         [[ " ${names[*]:-} " =~ " $n " ]] || names+=("$n")
-    done < <(find "$PI_EXTENSIONS" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' \) -not -name 'azure-foundry-models.json')
+    done < <(find "$PI_EXTENSIONS" -type f \( "${PI_FILE_TYPES[@]}" \))
 
     IFS=$'\n' names=($(sort <<<"${names[*]:-}")); unset IFS
 
@@ -781,23 +958,43 @@ sync_pi() {
 
 sync_pi_extensions
 
-# ─── Pi config files (~/.pi/agent/{models,settings}.json) ───
-# Sync repo pi/models.json and pi/settings.json with ~/.pi/agent/.
-# Supports bidirectional sync (same r/l/d/s flow as other config files).
+# ─── Pi skills (~/.pi/agent/skills) ───
+# pi discovers skills in this directory and the repo copy under pi/skills/ is
+# canonical, synced both directions. The 22 upstream Matt Pocock skills are
+# excluded — fetched from upstream instead of vendored (.gitignore, and
+# pi/extensions/README.md → "Not vendored").
+sync_pi_skills() {
+    [ -d "$PI_DIR" ] || return 0
+    [ -d "$REPO_DIR/pi/skills" ] || return 0
+    sync_directories "Pi Skills" "$REPO_DIR/pi/skills" "$PI_SKILLS" "$PI_SKILL_EXCLUDES"
+}
+
+sync_pi_skills
+
+# ─── Pi config files (~/.pi/agent/) ───
+# Sync repo pi/{AGENTS.md,models.json,settings.json,model-router.json} with
+# ~/.pi/agent/. Bidirectional, same r/l/d/s flow as other config files, with two
+# pi-specific protections: VOLATILE_SETTINGS_KEYS are ignored when comparing
+# (pi rewrites them on upgrade) and PROTECTED_SETTINGS_KEYS cannot be changed by
+# a repo → local copy without an explicit override — --force does not bypass it.
 sync_pi_config() {
-    [ -d "$HOME/.pi/agent" ] || return 0
+    [ -d "$PI_DIR" ] || return 0
 
     print_header "Pi Config"
-    mkdir -p "$HOME/.pi/agent"
+    mkdir -p "$PI_DIR"
 
     sync_pi_config_file() {
         local name="$1"
         local repo_file="$REPO_DIR/pi/$name"
-        local local_file="$HOME/.pi/agent/$name"
+        local local_file="$PI_DIR/$name"
 
         [ -f "$repo_file" ] || return 0
 
-        local status=$(compare_file "$repo_file" "$local_file")
+        local status
+        case "$name" in
+            *.json) status=$(compare_json_normalized "$repo_file" "$local_file") ;;
+            *) status=$(compare_file "$repo_file" "$local_file") ;;
+        esac
 
         case "$status" in
             identical)
@@ -809,22 +1006,13 @@ sync_pi_config() {
                     echo -e "  ${YELLOW}~${NC} $name ${GRAY}(differs)${NC}"
                     ((local_newer++))
                 elif $FORCE; then
-                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}→ copied repo to local${NC}"
-                    if ! $DRY_RUN; then
-                        backup_file "$local_file"
-                        cp "$repo_file" "$local_file"
-                        ((actions_taken++))
-                    fi
+                    echo -e "  ${YELLOW}~${NC} $name ${GRAY}(differs)${NC}"
+                    install_repo_over_live_config "$repo_file" "$local_file" || true
                     ((local_newer++))
                 else
                     action=$(ask_action "$name" "differs")
                     if [ "$action" = "repo" ]; then
-                        if ! $DRY_RUN; then
-                            backup_file "$local_file"
-                            cp "$repo_file" "$local_file"
-                            ((actions_taken++))
-                        fi
-                        echo -e "    ${GREEN}→ copied repo to local${NC}$($DRY_RUN && echo " (dry-run)")"
+                        install_repo_over_live_config "$repo_file" "$local_file" || true
                     elif [ "$action" = "local" ]; then
                         if ! $DRY_RUN; then
                             cp "$local_file" "$repo_file"
@@ -835,14 +1023,7 @@ sync_pi_config() {
                         diff "$repo_file" "$local_file" || true
                         read -p "    Use [r]epo / keep [l]ocal / [s]kip? " choice2
                         case "$choice2" in
-                            r|R)
-                                if ! $DRY_RUN; then
-                                    backup_file "$local_file"
-                                    cp "$repo_file" "$local_file"
-                                    ((actions_taken++))
-                                fi
-                                echo -e "    ${GREEN}→ copied repo to local${NC}"
-                                ;;
+                            r|R) install_repo_over_live_config "$repo_file" "$local_file" ;;
                             l|L)
                                 if ! $DRY_RUN; then
                                     cp "$local_file" "$repo_file"
@@ -857,11 +1038,8 @@ sync_pi_config() {
                 fi
                 ;;
             repo_only)
-                echo -e "  ${BLUE}↓${NC} $name ${GRAY}→ copied repo to local${NC}"
-                if ! $DRY_RUN; then
-                    cp "$repo_file" "$local_file"
-                    ((actions_taken++))
-                fi
+                echo -e "  ${BLUE}↓${NC} $name ${GRAY}(in repo, not local)${NC}"
+                install_repo_over_live_config "$repo_file" "$local_file" || true
                 ((repo_only++))
                 ;;
             local_only)
@@ -880,7 +1058,9 @@ sync_pi_config() {
         esac
     }
 
+    sync_pi_config_file "AGENTS.md"
     sync_pi_config_file "models.json"
+    sync_pi_config_file "model-router.json"
     sync_pi_config_file "settings.json"
 
     return 0
@@ -890,6 +1070,20 @@ sync_pi_config
 
 sync_pi
 pi_status=$?
+
+# ─── Codex ───
+# Codex reads global instructions from ~/.codex/AGENTS.md and discovers user
+# skills from ~/.codex/skills. Its system skills are excluded from sync.
+sync_codex() {
+    [ -d "$CODEX_DIR" ] || return 0
+    [ -d "$REPO_DIR/codex" ] || return 0
+
+    print_header "Codex"
+    sync_files "Codex Config" "$REPO_DIR/codex" "$CODEX_DIR" "AGENTS.md"
+    sync_directories "Codex Skills" "$REPO_DIR/codex/skills" "$CODEX_SKILLS" "$CODEX_SKILL_EXCLUDES"
+}
+
+sync_codex
 
 # Summary
 echo ""

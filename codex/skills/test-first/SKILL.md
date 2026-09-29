@@ -1,0 +1,172 @@
+---
+name: test-first
+description: Test-driven development with red-green-refactor loop. Use when user wants to build features or fix bugs using TDD, mentions "red-green-refactor", wants integration tests, or asks for test-first development.
+---
+
+# Test-Driven Development
+
+## Philosophy
+
+**Core principle**: Tests should verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't.
+
+**Good tests** are integration-style: they exercise real code paths through public APIs. They describe _what_ the system does, not _how_ it does it. A good test reads like a specification - "user can checkout with valid cart" tells you exactly what capability exists. These tests survive refactors because they don't care about internal structure.
+
+**Bad tests** are coupled to implementation. They mock internal collaborators, test private methods, or verify through external means (like querying a database directly instead of using the interface). The warning sign: your test breaks when you refactor, but behavior hasn't changed. If you rename an internal function and tests fail, those tests were testing implementation, not behavior.
+
+See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
+
+## When to Use (and When Not To)
+
+TDD is NOT universally beneficial. The `tdd-is-not-universal` rule gates on three conditions. If any condition fails, do not apply strict TDD.
+
+**Use TDD when:**
+- You have a known, stable spec to test against (written spec, API contract, acceptance criteria)
+- The code is long-lived (will be maintained/changed)
+- Core requirements are testable through public interfaces
+
+**Skip or defer TDD when:**
+- You're reverse-engineering, exploring unknown code, or discovering requirements as you go — self-written tests against incomplete understanding produce false confidence
+- The task is a trivial script or throwaway prototype
+- Core behavior resists unit testing (interactive CLIs, rendering, system calls) — use integration-level verification instead
+
+**The proven failure mode:** On black-box tasks where the spec is unknown, agents write tests for what they can observe, watch them pass, and confidently stop — shipping an incomplete product while spending 55% more. If you can't write tests that reliably detect an incomplete implementation, TDD is harmful.
+
+## Anti-Pattern: Horizontal Slices
+
+**DO NOT write all tests first, then all implementation.** This is "horizontal slicing" - treating RED as "write all tests" and GREEN as "write all code."
+
+This produces **crap tests**:
+
+- Tests written in bulk test _imagined_ behavior, not _actual_ behavior
+- You end up testing the _shape_ of things (data structures, function signatures) rather than user-facing behavior
+- Tests become insensitive to real changes - they pass when behavior breaks, fail when behavior is fine
+- You outrun your headlights, committing to test structure before understanding the implementation
+
+**Correct approach**: Vertical slices via tracer bullets. One test → one implementation → repeat. Each test responds to what you learned from the previous cycle. Because you just wrote the code, you know exactly what behavior matters and how to verify it.
+
+```
+WRONG (horizontal):
+  RED:   test1, test2, test3, test4, test5
+  GREEN: impl1, impl2, impl3, impl4, impl5
+
+RIGHT (vertical):
+  RED→GREEN: test1→impl1
+  RED→GREEN: test2→impl2
+  RED→GREEN: test3→impl3
+  ...
+```
+
+## Bug Fix Pattern (Prove-It)
+
+When a bug is reported, do NOT start by trying to fix it. Start by writing a test that reproduces it.
+
+1. Write a test that demonstrates the bug → test FAILS (confirms bug exists)
+2. Implement the fix → test PASSES (proves fix works)
+3. Run full test suite → no regressions
+
+This ensures the bug is actually fixed and can never silently return.
+
+## Test Naming
+
+Test names should read like specifications:
+- Good: `it('rejects tasks with empty titles')`
+- Good: `it('sets completedAt when task is completed')`
+- Bad: `it('validates titles correctly')`
+- Bad: `it('works')`
+
+## Workflow
+
+### 1. Planning
+
+Before writing any code:
+
+- [ ] Confirm with user what interface changes are needed
+- [ ] Confirm with user which behaviors to test (prioritize)
+- [ ] Identify opportunities for [deep modules](deep-modules.md) (small interface, deep implementation)
+- [ ] Design interfaces for [testability](interface-design.md)
+- [ ] List the behaviors to test (not implementation steps)
+- [ ] Get user approval on the plan
+
+Ask: "What should the public interface look like? Which behaviors are most important to test?"
+
+**You can't test everything.** Confirm with the user exactly which behaviors matter most. Focus testing effort on critical paths and complex logic, not every possible edge case.
+
+### 2. Tracer Bullet
+
+Write ONE test that confirms ONE thing about the system:
+
+```
+RED:   Write test for first behavior → test fails
+GREEN: Write minimal code to pass → test passes
+```
+
+This is your tracer bullet - proves the path works end-to-end.
+
+### 3. Incremental Loop
+
+For each remaining behavior:
+
+```
+RED:   Write next test → fails
+GREEN: Minimal code to pass → passes
+```
+
+Rules:
+
+- One test at a time
+- Minimal code to pass — then verify no known requirement is untested. Passing tests ≠ complete product.
+- Don't anticipate future tests
+- Keep tests focused on observable behavior
+
+### 4. Refactor
+
+After all tests pass, look for [refactor candidates](refactoring.md):
+
+- [ ] Extract duplication
+- [ ] Deepen modules (move complexity behind simple interfaces)
+- [ ] Apply SOLID principles where natural
+- [ ] Consider what new code reveals about existing code
+- [ ] Run tests after each refactor step
+
+**Never refactor while RED.** Get to GREEN first.
+
+## Common Rationalizations
+
+| Rationalization | Reality |
+|---|---|
+| "I'll write tests after the code works" | Tests written after test implementation, not behavior. You lose the design pressure. |
+| "This is too simple to test" | Simple code gets complicated. The test documents expected behavior. |
+| "I can see all the tests I need, let me write them all" | That's horizontal slicing. You'll test imagined behavior, not actual behavior. |
+| "Tests slow me down" | Tests slow you now. They speed you every time you change the code later. |
+| "I tested it manually" | Manual testing doesn't persist. Tomorrow's change might break it with no way to know. |
+| "The code is self-explanatory" | Tests ARE the specification. They document what the code should do, not what it does. |
+
+## Red Flags
+
+- Writing code without any corresponding tests
+- Tests that pass on the first run (may not test what you think)
+- Writing all tests before any implementation (horizontal slicing)
+- Test names that don't describe behavior ("works", "handles errors")
+- Bug fixes without reproduction tests
+- Skipping tests to make the suite pass
+- Mocking everything instead of testing real behavior
+- Tests pass but known requirements are untested
+- Behavior dropped because it "can't be unit tested" — use integration tests instead
+
+## When Unit Tests Won't Work
+
+Some behavior resists unit testing: interactive terminals, rendering output, os-level system calls, real-time behavior. When you encounter this:
+
+1. **Write an integration-level test** that exercises the real path end-to-end
+2. If even integration testing is impractical, **note it explicitly** with a manual verification checklist
+3. **Never drop behavior** because it's hard to test — that's shipping an incomplete product
+
+## Checklist Per Cycle
+
+```
+[ ] Test describes behavior, not implementation
+[ ] Test uses public interface only
+[ ] Test would survive internal refactor
+[ ] Code is minimal for this test
+[ ] No speculative features added
+```

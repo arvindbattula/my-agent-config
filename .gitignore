@@ -8,7 +8,35 @@ rules/pi-coding-agent.md
 pi/extensions/azure-foundry-models.json
 
 # Pi extension — machine-specific shim for Valar proxy (local only)
-pi/extensions/valar-strip-reasoning.ts
+pi/extensions/valar-dynamic.ts
+
+# Pi extension — written and overwritten by the Herdr integration (local only)
+pi/extensions/herdr-agent-state.ts
+
+# Pi skills — Matt Pocock upstream engineering skills, fetched separately rather
+# than vendored. Provenance and re-fetch steps: README.md → "Not vendored".
+pi/skills/ask-matt/
+pi/skills/code-review/
+pi/skills/codebase-design/
+pi/skills/diagnosing-bugs/
+pi/skills/domain-modeling/
+pi/skills/grilling/
+pi/skills/grill-with-docs/
+pi/skills/handoff/
+pi/skills/implement/
+pi/skills/prototype/
+pi/skills/resolving-merge-conflicts/
+pi/skills/setup-matt-pocock-skills/
+pi/skills/tdd/
+pi/skills/teach/
+pi/skills/to-questionnaire/
+pi/skills/to-spec/
+pi/skills/to-tickets/
+pi/skills/triage/
+pi/skills/wait-what/
+pi/skills/wayfinder/
+pi/skills/wizard/
+pi/skills/writing-for-agents/
 
 # Rule — machine-specific URL scheme allowlist (local only)
 rules/url-scheme-allowlist.md
