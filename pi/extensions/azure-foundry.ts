@@ -76,7 +76,8 @@ type ThinkingLevelMap = Record<string, string | null>;
 // thinking.type="enabled" (budget-based) and require thinking.type="adaptive" with
 // output_config.effort. `thinkingLevelMap` is passed through to pi verbatim so
 // getSupportedThinkingLevels offers the right levels (xhigh/max only where the
-// model actually supports them; off:null on Fable 5 which cannot disable thinking).
+// model actually supports them; off:null where the model cannot disable
+// thinking — Fable 5 and Opus 5).
 // Both fields are sourced from pi-ai's bundled anthropic.json catalog — the
 // regression test in azure-model-specs.test.mjs asserts they stay in sync.
 type Spec = {
@@ -97,7 +98,7 @@ export const MODEL_SPECS: Record<string, Spec> = {
   "claude-opus-4-7":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
   "claude-opus-4-8":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
   "claude-fable-5":    { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: FABLE_COST,  adaptive: true, thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" } },
-  "claude-opus-5":     { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
+  "claude-opus-5":     { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" } },
   "claude-sonnet-5":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: SONNET_5_COST, adaptive: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
 };
 

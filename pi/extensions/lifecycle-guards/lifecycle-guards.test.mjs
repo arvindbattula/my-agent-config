@@ -352,7 +352,10 @@ test("isMemoryFile: non-.md file in memory/ is not a memory file", () => {
 
 // ─── SESSION_CONTEXT ──────────────────────────────────────────────────────
 
-test("SESSION_CONTEXT: contains workflow reminder", () => {
+test("SESSION_CONTEXT: contains the workflow chain and the handoff pointer", () => {
+	// SESSION_CONTEXT is injected at every session start, so it must advertise
+	// the workflow the user actually drives (idea-refine … retro) and the
+	// /skill:handoff pointer for ending a session mid-work.
 	assert.match(SESSION_CONTEXT, /idea-refine/);
-	assert.match(SESSION_CONTEXT, /wrap-session/);
+	assert.match(SESSION_CONTEXT, /skill:handoff/);
 });

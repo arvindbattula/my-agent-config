@@ -406,11 +406,12 @@ function extractFrontmatter(text: string): string {
 
 // ─── Session context ──────────────────────────────────────────────────────
 
-export const SESSION_CONTEXT = `Workflow: /idea-refine → /discover → /blueprint → /construct → /inspect → /ship → /retro
+export const SESSION_CONTEXT = `Workflow (user-driven via /skill:): idea-refine → grill-with-docs → to-spec → to-tickets → implement → code-review → ship → retro.
+Specs and tickets are published to the project's issue tracker — do not create docs/spec.md or docs/plan.md.
+Project memory lives in ADRs (docs/decisions or equivalent) and the domain glossary; respect existing ADRs in any area you touch.
+Save preferences, library quirks, and surprises to mnemosyne memory as they surface — don't wait.
 For non-trivial tasks, start with a plan (plan-build-verify skill).
-Check docs/spec.md, docs/plan.md, docs/state.md if they exist in this project.
-Save preferences, library quirks, and surprises to memory as they surface — don't wait.
-At session end, run /wrap-session to route learnings to the right place.`;
+Ending a session mid-work: suggest /skill:handoff.`;
 
 // ─── Gate state file ──────────────────────────────────────────────────────
 

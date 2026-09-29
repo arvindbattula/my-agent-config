@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "tiers": {
+    "simple": "valar/moonshotai/Kimi-K3-fast",
+    "standard": "valar/qwen/qwen3.8-max",
+    "complex": "valar/zai-org/GLM-5.3"
+  },
+  "multimodal": "azure-claude/claude-opus-5"
+}

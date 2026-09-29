@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -30,22 +30,48 @@ globalThis.fetch = async () => { throw new Error("network disabled in test"); };
 
 const { MODEL_SPECS } = await import("./azure-foundry.ts");
 
-// Locate pi-ai's bundled Anthropic catalog by resolving the `pi` binary symlink.
-// The catalog is the authoritative source for model metadata; MODEL_SPECS must
-// stay in sync with it.
-function findCatalog() {
+// Locate pi-ai's bundled Anthropic catalog. The catalog is the authoritative
+// source for model metadata; MODEL_SPECS must stay in sync with it.
+//
+// `which pi` resolves to pi's shell launcher (~/.pi/agent/bin/pi), not to a
+// file inside the release, so the catalog is found by walking up from the
+// launcher to pi's agent directory — the ancestor holding install/current-version
+// or install/releases — and trying, in order: the pinned release, every
+// installed release (newest name first), and a node_modules next to that
+// directory for pre-managed-install layouts.
+const CATALOG_REL = "node_modules/@earendil-works/pi-ai/dist/providers/data/anthropic.json";
+
+function catalogCandidates() {
   const piBin = execSync("which pi", { encoding: "utf-8" }).trim();
-  const cliPath = realpathSync(piBin);
-  // dist/cli.js -> package root
-  const pkgDir = dirname(dirname(cliPath));
-  const catalogPath = resolve(
-    pkgDir,
-    "node_modules/@earendil-works/pi-ai/dist/providers/data/anthropic.json",
-  );
-  if (!existsSync(catalogPath)) {
-    throw new Error(`Cannot find anthropic.json catalog at ${catalogPath}`);
+  const candidates = [];
+  let dir = dirname(realpathSync(piBin));
+  for (;;) {
+    const versionFile = resolve(dir, "install", "current-version");
+    const releases = resolve(dir, "install", "releases");
+    if (existsSync(versionFile)) {
+      candidates.push(resolve(releases, readFileSync(versionFile, "utf-8").trim(), CATALOG_REL));
+    }
+    if (existsSync(releases)) {
+      for (const release of readdirSync(releases).sort().reverse()) {
+        candidates.push(resolve(releases, release, CATALOG_REL));
+      }
+    }
+    candidates.push(resolve(dir, CATALOG_REL));
+    const parent = dirname(dir);
+    if (existsSync(versionFile) || existsSync(releases) || parent === dir) break;
+    dir = parent;
   }
-  return JSON.parse(readFileSync(catalogPath, "utf-8"))["anthropic-messages"];
+  return candidates;
+}
+
+function findCatalog() {
+  const candidates = catalogCandidates();
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return JSON.parse(readFileSync(candidate, "utf-8"))["anthropic-messages"];
+    }
+  }
+  throw new Error(`Cannot find pi-ai's anthropic.json catalog. Tried:\n  ${candidates.join("\n  ")}`);
 }
 
 const catalog = findCatalog();

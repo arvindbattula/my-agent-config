@@ -1,247 +1,105 @@
 /**
- * Statusline footer for the Pi coding agent.
+ * Footer replacement: model + directory + git branch/diff stats on line one,
+ * context-usage bar with percent/token count and thinking level on line two.
+ * Ports `.claude/statusline.sh`'s layout to Pi's `ui.setFooter`, replacing
+ * the built-in footer (pwd/tokens/model rows).
  *
- * Mirrors the Claude Code `statusline.sh` output as closely as the Pi
- * extension API allows. Renders a two-line footer:
- *
- *   [model] 📁 dir (branch | N files +A -R) | ⚙ thinking
- *   ████████░░ 42% (12k) | $0.34 | ⏱️ 3m 12s
- *
- * Data-source notes (flagged assumptions):
- * - Cost: summed from ALL session entries (assistant, toolResult, compaction,
- *   branch_summary) via getEntries(), matching pi's built-in footer and
- *   /stats. Previously scoped to getBranch() and assistant-only, which
- *   undercounted after compaction and missed tool/summary usage.
- * - Context %/tokens: from ctx.getContextUsage() (Pi's own estimate).
- * - Duration: wall-clock since session_start. Pi does not expose a
- *   cumulative request-duration counter like Claude Code's
- *   cost.total_duration_ms, so this is elapsed session time instead.
- * - "Effort": mapped to Pi's thinking level (off/minimal/low/.../xhigh).
- * - Rate limits (5h/7d): not exposed by Pi -> omitted.
- *
- * Git diff stats (file count, +added/-removed) are not in footerData, so we
- * shell out to git the same way the bash statusline does, with a short cache
- * to avoid spawning git on every render.
+ * Cost, session duration, and rate-limit usage are not ported: Pi's
+ * extension API (as of @earendil-works/pi-coding-agent 0.87.1) does not
+ * expose per-session cost/duration or provider rate-limit data to
+ * extensions, unlike Claude Code's statusline hook input.
  */
 
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
-import { execFile } from "node:child_process";
 
-interface GitStats {
-	branch: string;
-	files: number;
-	added: number;
-	removed: number;
+function bar(percent: number): string {
+  const filled = Math.min(10, Math.floor(percent / 10));
+  return "█".repeat(filled) + "░".repeat(10 - filled);
 }
 
-const GIT_CACHE_MS = 2000;
+async function gitInfo(pi: ExtensionAPI, cwd: string): Promise<string> {
+  const isRepo = await pi.exec("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"]);
+  if (isRepo.code !== 0) return "";
 
-function runGit(cwd: string, args: string[]): Promise<string> {
-	return new Promise((resolve) => {
-		execFile("git", ["-C", cwd, ...args], { timeout: 1500 }, (err, stdout) => {
-			if (err) {
-				resolve("");
-				return;
-			}
-			resolve(stdout.toString());
-		});
-	});
+  let branch = (await pi.exec("git", ["-C", cwd, "branch", "--show-current"])).stdout.trim();
+  if (!branch) {
+    branch = (await pi.exec("git", ["-C", cwd, "rev-parse", "--short", "HEAD"])).stdout.trim() || "detached";
+  }
+
+  const status = (await pi.exec("git", ["-C", cwd, "status", "--porcelain"])).stdout;
+  const changedFiles = status.split("\n").filter((line) => line.trim().length > 0).length;
+  if (changedFiles === 0) return ` | (${branch})`;
+
+  const numstat = (await pi.exec("git", ["-C", cwd, "diff", "--numstat", "HEAD"])).stdout;
+  let added = 0;
+  let removed = 0;
+  for (const line of numstat.split("\n")) {
+    const [a, r] = line.split("\t");
+    if (a && !Number.isNaN(Number(a))) added += Number(a);
+    if (r && !Number.isNaN(Number(r))) removed += Number(r);
+  }
+  let stats = `${changedFiles} files`;
+  if (added > 0) stats += ` +${added}`;
+  if (removed > 0) stats += ` -${removed}`;
+  return ` | (${branch} | ${stats})`;
 }
 
-async function collectGitStats(cwd: string, branchHint: string | null): Promise<GitStats | null> {
-	if (!branchHint) return null;
-
-	const status = await runGit(cwd, ["status", "--porcelain"]);
-	const files = status.split("\n").filter((line) => line.trim().length > 0).length;
-
-	let added = 0;
-	let removed = 0;
-	if (files > 0) {
-		const numstat = await runGit(cwd, ["diff", "--numstat", "HEAD"]);
-		for (const line of numstat.split("\n")) {
-			const [a, r] = line.split("\t");
-			if (a !== undefined && r !== undefined) {
-				added += Number.parseInt(a, 10) || 0;
-				removed += Number.parseInt(r, 10) || 0;
-			}
-		}
-	}
-
-	return { branch: branchHint, files, added, removed };
+function dirName(cwd: string): string {
+  const parts = cwd.split("/").filter(Boolean);
+  if (parts.length === 0) return "/";
+  if (parts.length === 1) return parts[0];
+  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
 }
 
-function shortenDir(cwd: string): string {
-	const parts = cwd.replace(/\/+$/, "").split("/").filter(Boolean);
-	if (parts.length === 0) return "/";
-	if (parts.length === 1) return parts[0];
-	return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+interface FooterState {
+  modelName: string;
+  dir: string;
+  branchInfo: string;
+  thinking: string;
+  percent: number;
+  tokensK: string;
 }
 
-function formatTokens(tokens: number): string {
-	return `${Math.floor(tokens / 1000)}k`;
-}
+export default function statuslineExtension(pi: ExtensionAPI): void {
+  const state: FooterState = {
+    modelName: "?",
+    dir: "",
+    branchInfo: "",
+    thinking: "",
+    percent: 0,
+    tokensK: "?",
+  };
 
-function formatDuration(ms: number): string {
-	const mins = Math.floor(ms / 60000);
-	const secs = Math.floor((ms % 60000) / 1000);
-	return `${mins}m ${secs}s`;
-}
+  async function refresh(ctx: ExtensionContext): Promise<void> {
+    state.modelName = ctx.model?.name ?? "?";
+    state.dir = dirName(ctx.cwd);
+    state.branchInfo = await gitInfo(pi, ctx.cwd);
+    state.thinking = ctx.thinkingLevel ? ` | ⚙ ${ctx.thinkingLevel}` : "";
 
-function buildBar(percent: number, theme: Theme): string {
-	const clamped = Math.max(0, Math.min(100, percent));
-	const filled = Math.min(10, Math.floor(clamped / 10));
-	const empty = 10 - filled;
-	const color = clamped >= 90 ? "error" : clamped >= 70 ? "warning" : "success";
-	return theme.fg(color, "█".repeat(filled)) + theme.fg("dim", "░".repeat(empty));
-}
+    const usage = ctx.getContextUsage();
+    state.percent = usage?.percent ?? 0;
+    state.tokensK = usage?.tokens != null ? `${Math.round(usage.tokens / 1000)}k` : "?";
+  }
 
-export default function (pi: ExtensionAPI) {
-	const install = (ctx: ExtensionContext) => {
-		// Reset per session_start so the timer and git cache reflect the current
-		// session, not the original extension load (session_start also fires on
-		// /new, /resume, and /fork without reloading the extension module).
-		const sessionStart = Date.now();
-		// Pre-seed with an expired timestamp so the first render triggers a git
-		// refresh immediately (no cold-start flicker of missing branch stats).
-		let gitCache: { ts: number; stats: GitStats | null } = { ts: -Infinity, stats: null };
-		let gitInFlight = false;
-		// Memoize cost: getEntries() is O(n) and render() fires on every text
-		// delta. Recompute only when the entry count changes. Aggregates over
-		// ALL session entries (assistant, toolResult, compaction, branch_summary)
-		// to match pi's built-in footer and /stats — not just assistant messages
-		// on the current branch, which undercounted after compaction and missed
-		// tool/summary usage.
-		let costCache = { entries: -1, total: 0 };
+  // Refreshes serialize so a slow git exec from an earlier event can't
+  // overwrite state written by a later one.
+  let queue: Promise<void> = Promise.resolve();
+  function scheduleRefresh(ctx: ExtensionContext): void {
+    queue = queue.then(() => refresh(ctx)).catch(() => {});
+  }
 
-		ctx.ui.setFooter(
-			(
-				tui: { requestRender: () => void },
-				theme: Theme,
-				footerData: {
-					getGitBranch: () => string | null;
-					onBranchChange: (cb: () => void) => () => void;
-					getExtensionStatuses: () => ReadonlyMap<string, string>;
-				},
-			) => {
-				let disposed = false;
-				const unsub = footerData.onBranchChange(() => {
-					gitCache = { ts: -Infinity, stats: null };
-					if (!disposed) tui.requestRender();
-				});
-
-				const refreshGit = (branch: string | null) => {
-					if (gitInFlight || disposed) return;
-					gitInFlight = true;
-					void collectGitStats(ctx.cwd, branch).then((stats) => {
-						gitInFlight = false;
-						if (disposed) return;
-						gitCache = { ts: Date.now(), stats };
-						tui.requestRender();
-					});
-				};
-
-				return {
-					dispose() { disposed = true; unsub(); },
-					invalidate() {},
-					render(width: number): string[] {
-						const branch = footerData.getGitBranch();
-
-						if (Date.now() - gitCache.ts > GIT_CACHE_MS) {
-							refreshGit(branch);
-						}
-						const stats = gitCache.stats;
-
-						// Cost from ALL session entries (memoized). Mirrors pi's footer.js
-						// and getSessionStats(): assistant + toolResult messages, plus
-						// compaction and branch_summary entries. Using getEntries()
-						// (full session) not getBranch() (current path only) so cost
-						// survives compaction — getBranch() drops everything compacted away.
-						const allEntries = ctx.sessionManager.getEntries();
-						if (allEntries.length !== costCache.entries) {
-							let total = 0;
-							for (const entry of allEntries) {
-								if (entry.type === "message" && entry.message.role === "assistant") {
-									total += (entry.message as AssistantMessage).usage.cost.total;
-								} else if (entry.type === "message" && entry.message.role === "toolResult" && (entry.message as any).usage) {
-									total += (entry.message as any).usage.cost.total;
-								} else if ((entry.type === "compaction" || entry.type === "branch_summary") && (entry as any).usage) {
-									total += (entry as any).usage.cost.total;
-								}
-							}
-							costCache = { entries: allEntries.length, total };
-						}
-						const cost = costCache.total;
-
-						const usage = ctx.getContextUsage();
-						const tokens = usage?.tokens ?? 0;
-						const percent = usage?.percent ?? 0;
-
-						const modelName = ctx.model?.name ?? "?";
-						const dir = shortenDir(ctx.cwd);
-						const thinking = pi.getThinkingLevel();
-
-						// --- Line 1: model, dir, branch, thinking ---
-						let branchSeg = "";
-						if (branch) {
-							if (stats && stats.files > 0) {
-								const pieces = [
-									theme.fg("warning", `(${branch}`),
-									theme.fg("warning", "|"),
-									theme.fg("dim", `${stats.files} files`),
-								];
-								if (stats.added > 0) pieces.push(theme.fg("success", `+${stats.added}`));
-								if (stats.removed > 0) pieces.push(theme.fg("error", `-${stats.removed}`));
-								pieces.push(theme.fg("warning", ")"));
-								branchSeg = ` ${theme.fg("dim", "|")} ${pieces.join(" ")}`;
-							} else {
-								branchSeg = ` ${theme.fg("dim", "|")} ${theme.fg("warning", `(${branch})`)}`;
-							}
-						}
-
-						const thinkingSeg =
-							thinking !== "off"
-								? ` ${theme.fg("dim", "|")} ${theme.fg("accent", `⚙ ${thinking}`)}`
-								: "";
-
-						// Extension status indicators (e.g. plan-mode's "⏸ plan").
-						// setStatus() writes here; a custom footer must render them itself.
-						let extSeg = "";
-						const statuses = footerData.getExtensionStatuses();
-						if (statuses.size > 0) {
-							const parts = [...statuses.values()].filter((v) => v && v.length > 0);
-							if (parts.length > 0) {
-								extSeg = ` ${theme.fg("dim", "|")} ${parts.join(" ")}`;
-							}
-						}
-
-						const line1 =
-							`${theme.fg("accent", `[${modelName}]`)} ${theme.fg("text", "📁")} ${theme.fg("text", dir)}` +
-							branchSeg +
-							thinkingSeg +
-							extSeg;
-
-						// --- Line 2: context bar, %, tokens, cost, duration ---
-						const bar = buildBar(percent, theme);
-						const pct = theme.fg("text", `${Math.floor(percent)}%`);
-						const tok = theme.fg("dim", `(${formatTokens(tokens)})`);
-						const costStr = theme.fg("warning", `$${cost.toFixed(2)}`);
-						const dur = theme.fg("text", `⏱️ ${formatDuration(Date.now() - sessionStart)}`);
-						const sep = theme.fg("dim", "|");
-
-						const line2 = `${bar} ${pct} ${tok} ${sep} ${costStr} ${sep} ${dur}`;
-
-						return [truncateToWidth(line1, width), truncateToWidth(line2, width)];
-					},
-				};
-			},
-		);
-	};
-
-	pi.on("session_start", async (_event, ctx) => {
-		if (!ctx.hasUI) return;
-		install(ctx);
-	});
+  pi.on("session_start", (_event, ctx) => {
+    ctx.ui.setFooter((_tui, theme) => ({
+      render: () => [
+        theme.fg("dim", `[${state.modelName}] 📁 ${state.dir}${state.branchInfo}${state.thinking}`),
+        theme.fg("dim", `${bar(state.percent)} ${Math.round(state.percent)}% (${state.tokensK})`),
+      ],
+      invalidate: () => {},
+    }));
+    scheduleRefresh(ctx);
+  });
+  pi.on("turn_end", (_event, ctx) => scheduleRefresh(ctx));
+  pi.on("agent_end", (_event, ctx) => scheduleRefresh(ctx));
+  pi.on("model_select", (_event, ctx) => scheduleRefresh(ctx));
+  pi.on("thinking_level_select", (_event, ctx) => scheduleRefresh(ctx));
 }
