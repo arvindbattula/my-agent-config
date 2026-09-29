@@ -1,6 +1,6 @@
 # my-agent-config
 
-Personal agent configuration — skills, commands, rules, and settings — synced across machines. Primary target is Claude Code (`~/.claude`); skills and extensions are also synced for the Pi coding agent, and Codex reads `AGENTS.md` directly.
+Personal agent configuration — skills, commands, rules, and settings — synced across machines. Claude Code (`~/.claude`), Pi (`~/.pi/agent`), and Codex (`~/.codex`) are wired up.
 
 ## Quick Start
 
@@ -121,9 +121,41 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 ### Config
 - `settings.json` — Permissions, hooks, extended thinking, plugins, statusline
 - `statusline.sh` — Terminal status bar showing directory, model, context usage, git state (Claude Code)
-- `pi/extensions/statusline.ts` — Equivalent two-line footer for the Pi coding agent, synced to `~/.pi/agent/extensions/` by `install.sh` (auto-discovered by the Pi CLI). Shows model, dir, git branch + diff stats, thinking level, context bar, tokens, cost, and session elapsed time. Rate limits are omitted (not exposed by Pi); duration is session wall-clock rather than cumulative request time. Colors use `theme.fg()`, so the footer adapts to the active Pi theme.
 
-> **Light terminal:** Pi auto-detects terminal background; if it guesses wrong (e.g. a dark theme on a white terminal), text becomes unreadable. Set `"theme": "light"` in your **personal** `~/.pi/agent/settings.json` — this is machine/terminal-specific and intentionally not committed.
+### Pi
+
+`pi/` holds the Pi coding agent configuration and mirrors to `~/.pi/agent/` in both directions.
+
+| Path | Synced to | What it is |
+|---|---|---|
+| `pi/AGENTS.md` | `~/.pi/agent/AGENTS.md` | Global instructions applied in every working directory: prose style plus all 23 rules. Pi applies one global instructions file with no glob-level rule scoping, so the rules from `rules/` are inlined here with their `applies to` globs in the text. Edit both when a rule changes. |
+| `pi/skills/` | `~/.pi/agent/skills/` | 38 pi-native skill directories — see the breakdown below. |
+| `pi/extensions/` | `~/.pi/agent/extensions/` | Extensions and their test suites. Documented in `pi/extensions/README.md`. |
+| `pi/settings.json` | `~/.pi/agent/settings.json` | Default provider/model, `enabledModels` scope, packages, retry, compaction. `retry` is protected and `lastChangelogVersion` is ignored when comparing — see "How Sync Works". |
+| `pi/models.json` | `~/.pi/agent/models.json` | Custom provider and model definitions (`valar`, `azure-claude`). |
+| `pi/model-router.json` | `~/.pi/agent/model-router.json` | Complexity tiers and the multimodal fallback for `model-router.ts`. |
+
+`pi/skills/` breaks down as:
+
+| Count | Category |
+|---|---|
+| 20 | Native ports of `commands/*.md` — same workflow, with `/skill:` references, `disable-model-invocation`, and `AGENTS.md`/`CONTEXT.md` conventions instead of the Claude Code ones. Every command except `grill-me`, which upstream covers with `grilling` + `grill-with-docs`. |
+| 15 | Mirrors of `skills/*` so pi reads one copy instead of reaching through `~/.agents/skills`. Three have no mirror: `debugging`, `test-first`, and `triage`, which upstream replaces with `diagnosing-bugs`, `tdd`, and its own `triage`. |
+| 3 | Pi-only: `unslop` (prose cleanup pass), `gwt` and `mwt` (dsu-studio git-worktree kickoff and merge instructions). |
+
+The three pi-only skills are committed on purpose. `gwt` and `mwt` name another project (dsu-studio, `qcg-dsu-land-pipeline`) and belong in that repo's `.agents/skills/` in principle; they live here so a machine move restores them. Both are `disable-model-invocation`, so they load only on `/skill:gwt` or `/skill:mwt`.
+
+**Not synced** — recreated on a new machine instead, and gitignored so `install.sh` never offers to pull them in:
+
+| What | Why |
+|---|---|
+| 22 upstream Matt Pocock skills: `ask-matt`, `code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grilling`, `grill-with-docs`, `handoff`, `implement`, `prototype`, `resolving-merge-conflicts`, `setup-matt-pocock-skills`, `tdd`, `teach`, `to-questionnaire`, `to-spec`, `to-tickets`, `triage`, `wait-what`, `wayfinder`, `wizard`, `writing-for-agents` | Fetched from [mattpocock/skills](https://github.com/mattpocock/skills) rather than vendored, so upstream revisions stay available. Fetch them into `~/.pi/agent/skills/`; the list is mirrored in `.gitignore` and in `PI_UPSTREAM_SKILLS` in `install.sh`. Any local edit to one of them is unversioned — vendor it here instead if you change it. |
+| `pi/extensions/valar-dynamic.ts` | Personal Valar provider shim, including reverse-engineered per-model pricing. Meaningless without a Valar key. |
+| `pi/extensions/herdr-agent-state.ts` | Written and overwritten by the Herdr integration, which says so in its own header. |
+| `pi/extensions/azure-foundry-models.json` | Runtime cache from live ARM discovery; rewrites its timestamp on every start. |
+| `~/.pi/agent/auth.json`, `trust.json`, `models-store.json` | Machine state, never synced. |
+
+> **Light terminal:** Pi auto-detects terminal background; if it guesses wrong (e.g. a dark theme on a white terminal), text becomes unreadable. `pi/settings.json` commits `"theme": "light"` as the team default. If your terminal is dark, set `"dark"` live and answer `l` (keep local) at the `settings.json` prompt so the repo copy cannot revert it.
 
 ## How Sync Works
 
@@ -137,13 +169,30 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 
 All overwrites create timestamped backups in `~/.claude/backups/`.
 
-Beyond `~/.claude/`, `install.sh` also syncs Pi coding agent resources when present:
-- **Pi skills** (`~/.agents/skills`) — repo skills are symlinked; `/`-commands are generated into `source-command-*` skills.
-- **Pi extensions** (`~/.pi/agent/extensions`) — repo `pi/extensions/*.ts` are copied there (auto-discovered by the Pi CLI). Personal extensions not in the repo (e.g. `azure-foundry.ts`) show as `+ local only` and are never pulled in automatically.
+Pi paths sync the same way when `~/.pi/agent` exists:
+- **Pi skills** (`pi/skills/` ↔ `~/.pi/agent/skills/`) — compared per skill directory, recursively. The 22 upstream Matt Pocock skills, the `reports/` audit log, and `.hook-state/` are excluded; the header reports how many.
+- **Pi extensions** (`pi/extensions/` ↔ `~/.pi/agent/extensions/`) — `.ts`, `.mts`, `.mjs`, `.md`, `.json`, recursing into subdirs so `lib/` and `plan-mode/` sync. The pattern used to stop at `.ts`/`.md`/`.json`, so the test suites were hand-copied instead; two had drifted by the time this was fixed on 2026-09-25.
+- **Pi config** (`pi/{AGENTS.md,settings.json,models.json,model-router.json}` ↔ `~/.pi/agent/`) with two protections:
+  - `lastChangelogVersion` is stripped before comparing, so a pi upgrade does not report drift.
+  - `retry` is protected. A repo → local copy that would change it is refused until you answer `o` after seeing both values, and `--force` cannot bypass that. The setting has been clobbered off twice; with it off, transient blips to api.valarhq.ai read as "Error: Connection error."
+- **Pi skills via `~/.agents/skills`** — the older path, still wired: repo `skills/` are symlinked there and `commands/` are generated into `source-command-*` skills. Two overlaps follow from keeping it. A plain `./install.sh` run symlinks all 18 repo skills into `~/.agents/skills`, so the 15 that `pi/skills/` mirrors are then discoverable from two locations under the same name — pi logs a name-collision warning and keeps whichever it discovers first. And because `pi/skills/` carries native ports of every command except `grill-me`, pi also loads a `source-command-*` twin of each workflow under a different name, so both show up. Neither overlap is harmful, both are noise; retiring the generator and the symlink path is a separate decision.
 
-Both sections only run if the corresponding Pi directory already exists.
+Prefer a plain `./install.sh` run over `--force`. `--force` answers every "differs" prompt with `repo` without showing the choice, which is how live settings got clobbered.
+
+Verify a change to the sync logic with `bash install.test.sh` (22 assertions over JSON normalization and the protected-key guard) and `bash hooks/hooks.test.sh` (68 assertions over the Claude Code hooks).
 
 > **Note:** A running Claude Code session manages `~/.claude/settings.json` in memory and may overwrite external changes. If `settings.json` shows as "differs" after sync, exit all Claude Code sessions first, then run `./install.sh` again.
+
+### Codex
+
+`codex/` contains the Codex-compatible portion of the configuration:
+
+| Path | Synced to | What it is |
+|---|---|---|
+| `codex/AGENTS.md` | `~/.codex/AGENTS.md` | Global prose and engineering instructions |
+| `codex/skills/` | `~/.codex/skills/` | Shared skills plus command ports, invoked as `$skill-name` |
+
+The port uses the Agent Skills format: each skill is a directory with a `SKILL.md` file and optional references. Claude hooks, Claude permissions/plugins, Pi extensions, and Pi provider/model settings remain harness-specific and are not copied into Codex. Codex's `.system` skills are excluded from sync.
 
 ## Contributing
 
@@ -154,6 +203,10 @@ Both sections only run if the corresponding Pi directory already exists.
 ## Origin
 
 Skills originally ported from [brianlovin/agent-config](https://github.com/brianlovin/agent-config) and [mattpocock/skills](https://github.com/mattpocock/skills), renamed for clarity, reorganized into skills vs commands, and extended with custom rules.
+
+The newer Matt Pocock engineering set (`to-spec`, `to-tickets`, `implement`, `code-review`, `handoff`, `wayfinder`, and 16 more) is not vendored — it stays in `~/.pi/agent/skills/` from upstream. See the "Not synced" table under Pi.
+
+`pi/skills/unslop` is adapted from pstack's unslop skill (MIT, Lauren Tan) with the em-dash rule softened and the scope narrowed to prose.
 
 Security, debugging, API design, git workflow, performance, frontend UI, and shipping skills adapted from [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) — a production-grade engineering skills library for AI coding agents. Anti-rationalization tables and red flags patterns also drawn from that project.
 
