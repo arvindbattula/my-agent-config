@@ -8,7 +8,13 @@ Extensions for the [Pi coding agent](https://github.com/earendil-works/pi-coding
 Shared Entra ID token acquisition utility used by both Azure extensions. Caches tokens per resource with automatic refresh. Not a standalone provider — imported by the other extensions. Lives under `lib/` on purpose: pi auto-loads **every top-level file** in `extensions/` as an extension (each must export a default factory), so shared helpers must sit in a subdirectory. A subdir without an `index.ts` or a pi-manifest `package.json` is ignored by pi's loader but stays importable (e.g. `from "./lib/azure-token"`).
 
 ### `statusline.ts`
-Two-line status widget (`ui.setWidget`) showing model, directory, git branch + diff stats, thinking level, and context usage (bar, percent, tokens). Cost, session duration, and rate-limit usage from the Claude Code version aren't ported — the extension API doesn't expose that data to extensions.
+Two-line footer (`ui.setFooter`). Line one: model, directory, git branch + diff stats, thinking level. Line two: context-usage bar with percent/tokens, session cost, elapsed session time.
+
+The timer counts wall-clock time since pi attached to the session, so every `session_start` restarts it — `/new`, `/resume`, `/fork`, and extension reload all read `0m 00s` again, and time with pi closed never counts. Cost sums `usage.cost.total` over the same entry kinds pi's built-in footer counts (assistant messages, tool results, `usage`, compaction, branch summaries) and prints three decimals, so a sub-cent session stays visible.
+
+pi only redraws on events, so the footer component owns a 1 Hz `tui.requestRender()` tick; it is `unref()`'d and cleared both by its own `dispose` and on `session_shutdown`, because pi's teardown disposes the built-in footer but not a custom one. Provider rate-limit usage from the Claude Code version is still not ported — the API does not expose it.
+
+Test with `node statusline.test.mts`.
 
 ### `model-router.ts`
 Picks the model for a session from its first prompt. Ports Claude Code's `model-router.sh` + `model-router-lib.sh`, with the one switch that harness couldn't do: `pi.setModel()` applies the routed model for the rest of the session.
@@ -63,7 +69,7 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 
 ### Test files
 
-Every extension test lives next to the code it covers. Counts verified 2026-09-25 on Node v24.21.0: 191 checks, all passing. Each suite runs with `node <file>` from `~/.pi/agent/extensions` or from `pi/extensions` in the repo — both work, since the suites use relative imports. Native TypeScript type stripping needs Node >= 23.6 (`--experimental-strip-types` on 22.6–23.5). The azure and lifecycle-guards suites register `ts-resolve-hook.mjs`, which appends `.ts` to extensionless relative imports — pi's bundler resolves those, Node's loader doesn't.
+Every extension test lives next to the code it covers. Counts re-verified 2026-09-30 on Node v24.21.0: 224 checks in six suites. Five suites (149 checks) pass; `azure-model-specs.test.mjs` aborts on its first assertion because pi 0.99.1's bundled `anthropic.json` no longer lists `claude-haiku-4-5`, so `MODEL_SPECS` names a model the catalog dropped. That is catalog drift against a newer pi, unrelated to the statusline work, and still open. Each suite runs with `node <file>` from `~/.pi/agent/extensions` or from `pi/extensions` in the repo — both work, since the suites use relative imports. Native TypeScript type stripping needs Node >= 23.6 (`--experimental-strip-types` on 22.6–23.5). The azure and lifecycle-guards suites register `ts-resolve-hook.mjs`, which appends `.ts` to extensionless relative imports — pi's bundler resolves those, Node's loader doesn't.
 
 | File | Checks | What it guards |
 |---|---|---|
@@ -72,6 +78,7 @@ Every extension test lives next to the code it covers. Counts verified 2026-09-2
 | `azure-stream-result.test.mjs` | 23 | Azure stream-result normalization: `finish_reason` mapping, delta handling, retry loop. |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` payload mapping per model. |
 | `model-router.test.mts` | 27 | Multimodal detection (attached images, `.pdf` tokens), config normalization, model-ref resolution, routing decisions. Drives the real extension factory and the real `model-router.json`; only the Jev fetch is stubbed. |
+| `statusline.test.mts` | 33 | Elapsed-time and cost formatters, the entry kinds that count toward session cost, and the footer itself — two-line render, tick-per-second advancement, ticker cleanup on `dispose` and `session_shutdown`, timer reset on a later `session_start`. Drives the real extension factory with a faked clock and faked interval timers; the git branch line runs against a real temp repo through a real `execFile`. |
 
 ### `plan-mode/`
 Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details.
@@ -127,7 +134,7 @@ Prefer `./install.sh` over `./install.sh --force`. `--force` answers every "diff
 - **No Azure identifiers in version control.** All subscription IDs, resource group names, account names, and endpoint URLs are configured via environment variables. Nothing sensitive is committed.
 - **No credentials anywhere in the tree.** Extensions read keys from the environment (`TYPESAFE_API_KEY`, Azure/Entra via `az cli`). `~/.pi/agent/auth.json`, `trust.json`, and `models-store.json` are machine state and are never synced.
 - **Cache files stay local.** `azure-foundry-models.json` is a runtime artifact generated from live ARM discovery. It is gitignored and never committed.
-- **Test files sync too.** The extension glob covers `.ts`, `.mts`, `.mjs`, `.md`, and `.json`, so the five test suites stay in step with the code they cover. Before the `.mjs`/`.mts` patterns landed on 2026-09-25 they were hand-copied, and two — `azure-model-specs.test.mjs` and `lifecycle-guards/lifecycle-guards.test.mjs` — were carrying live fixes that never reached the repo.
+- **Test files sync too.** The extension glob covers `.ts`, `.mts`, `.mjs`, `.md`, and `.json`, so the six test suites stay in step with the code they cover. Before the `.mjs`/`.mts` patterns landed on 2026-09-25 they were hand-copied, and two — `azure-model-specs.test.mjs` and `lifecycle-guards/lifecycle-guards.test.mjs` — were carrying live fixes that never reached the repo.
 - **`settings.json` is tracked with a drift guard.** `retry` is protected and `lastChangelogVersion` is ignored when comparing — see "Repo/live settings drift" below.
 - **Cost data is public list pricing.** Per-token rates are sourced from Anthropic's published pricing and are estimates only. Actual Azure contract rates may differ.
 - **Non-Claude models are statically defined.** Unlike Claude models (discovered dynamically via ARM API), DeepSeek/Kimi models in `azure-openai-models.ts` are defined in a static `MODELS` array. This is deliberate — these models use a different API path (OpenAI-compat vs Anthropic) and their deployment list is small and stable. To add a new non-Claude model, edit the `MODELS` array and re-sync.
