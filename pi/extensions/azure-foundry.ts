@@ -13,6 +13,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { homedir } from "node:os";
+import { collapseSystemMessages, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { getAzureToken } from "./lib/azure-token";
 import { fetchWithTransientRetry, readRetryConfig } from "./lib/transient-retry";
 
@@ -326,9 +327,21 @@ export default async function (pi: any) {
         };
         finalMessage = output;
 
+        // pi 1.1.0 hands providers a normalized TranscriptContext that carries only
+        // `messages`: the system prompt and the tool declarations live in transcript
+        // system messages, so `context.systemPrompt` and `context.tools` are both
+        // undefined here. Reading them directly left `body.tools` unset on every
+        // request, which is why Claude models answered "no executable tools are wired
+        // up" while valar — which uses pi's built-in openai-completions implementation
+        // rather than a custom streamSimple — had tools all along.
+        // Anthropic takes a single top-level system prompt and has no mid-conversation
+        // system role, so fold later system messages into the leading one first.
+        const transcript = collapseSystemMessages(context);
+        const systemPrompt = getCurrentSystemPrompt(transcript.messages);
+
         // Map pi messages to Anthropic API format
         const rawMapped: any[] = [];
-        for (const m of context.messages ?? []) {
+        for (const m of transcript.messages) {
           if (m.role === "user") {
             const content =
               typeof m.content === "string"
@@ -340,10 +353,23 @@ export default async function (pi: any) {
                     );
             rawMapped.push({ role: "user", content });
           } else if (m.role === "assistant") {
+            // Thinking signatures are an Anthropic-API concept and are only valid on
+            // turns Anthropic itself produced. pi records the originating API on each
+            // assistant message (m.api), and a turn from another API carries a
+            // placeholder signature — valar/Kimi emits the literal string "reasoning" —
+            // which is non-empty, so the signature check below would happily replay it
+            // and Anthropic answers 400 "Invalid `signature` in `thinking` block".
+            // Because the offending turn stays in history, EVERY later request fails:
+            // switching to a Claude model mid-session breaks the rest of the session.
+            // Drop foreign thinking blocks outright rather than converting them to text —
+            // replaying reasoning as prose teaches the model to emit its chain of thought
+            // as visible output on subsequent turns.
+            const thinkingIsReplayable = m.api === "anthropic";
             const content = (m.content ?? [])
               .map((c: any) => {
                 if (c.type === "text") return { type: "text", text: c.text };
                 if (c.type === "thinking") {
+                  if (!thinkingIsReplayable) return null;
                   // Redacted thinking: pass the opaque payload back as redacted_thinking.
                   // Drop it if the data is missing/empty — Anthropic rejects a
                   // redacted_thinking block without a data payload.
@@ -418,7 +444,7 @@ export default async function (pi: any) {
           }
         }
 
-        const tools = (context.tools ?? []).map((t: any) => ({
+        const tools = getCurrentTools(transcript.messages).map((t: any) => ({
           name: t.name,
           description: t.description,
           input_schema: t.parameters ?? { type: "object", properties: {} },
@@ -431,7 +457,7 @@ export default async function (pi: any) {
           stream: true,
         };
 
-        if (context.systemPrompt) body.system = context.systemPrompt;
+        if (systemPrompt) body.system = systemPrompt;
         if (tools.length > 0) body.tools = tools;
 
         // Anthropic extended thinking — must be explicitly requested for reasoning models.

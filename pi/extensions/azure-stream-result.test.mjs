@@ -121,6 +121,7 @@ for (const modulePath of ["./azure-foundry.ts", "./azure-openai-models.ts"]) {
 // "Error: …" line instead of one per attempt.
 
 const foundryStreamSimple = await getStreamSimple("./azure-foundry.ts");
+const openaiStreamSimple = await getStreamSimple("./azure-openai-models.ts");
 let fetchCalls = 0;
 const stubTransientFetch = (status, body) => async () => {
   fetchCalls++;
@@ -137,7 +138,7 @@ const RETRY_PROVIDERS = [
   },
   {
     label: "azure-openai-models",
-    streamSimple: await getStreamSimple("./azure-openai-models.ts"),
+    streamSimple: openaiStreamSimple,
     maxEnv: "AZURE_FOUNDRY_OPENAI_MAX_RETRIES",
   },
 ];
@@ -458,6 +459,205 @@ await check("azure-openai-models: unknown finish_reason passes through (not 'pen
   for await (const _ of stream) { /* drain */ }
   const msg = await stream.result();
   assert.equal(msg.stopReason, "insensitive_stream", `unknown finish_reason must pass through, got '${msg.stopReason}'`);
+});
+
+// ── azure-foundry.ts: cross-API thinking-block replay ────────────────────────
+// Contract (verified live against the Foundry Anthropic endpoint, 2026-10-13):
+// replaying a thinking block whose signature Anthropic did not mint returns
+//   400 invalid_request_error "messages.N.content.0: Invalid `signature` in
+//   `thinking` block"
+// and dropping that block instead returns 200. pi tags each assistant message
+// with the API that produced it (m.api), and non-Anthropic providers put a
+// placeholder there — valar/Kimi uses the literal string "reasoning". Since the
+// offending turn stays in history, one foreign thinking block permanently breaks
+// every subsequent request in the session.
+
+/** Capture the request body azure-foundry sends, then end the stream cleanly. */
+async function captureRequestBody(context) {
+  let sent;
+  globalThis.fetch = async (_url, opts) => {
+    sent = JSON.parse(opts.body);
+    return sseResponse([
+      JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 1 } } }),
+      JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } }),
+    ]);
+  };
+  const stream = await foundryStreamSimple(MODEL, context, {});
+  for await (const _ of stream) { /* drain */ }
+  return sent;
+}
+
+const FOREIGN_TURN = {
+  role: "assistant",
+  api: "openai-completions",
+  provider: "valar",
+  model: "moonshotai/Kimi-K3-fast",
+  content: [
+    { type: "thinking", thinking: "Foreign reasoning.", thinkingSignature: "reasoning" },
+    { type: "text", text: "ok" },
+  ],
+};
+
+const NATIVE_TURN = {
+  role: "assistant",
+  api: "anthropic",
+  provider: "azure-claude",
+  model: "claude-opus-5",
+  content: [
+    { type: "thinking", thinking: "Native reasoning.", thinkingSignature: "CAISyAUKwwIIEhgCKkDxyANe" },
+    { type: "text", text: "ok" },
+  ],
+};
+
+await check("azure-foundry: thinking from a non-anthropic api is NOT replayed", async () => {
+  const body = await captureRequestBody({
+    systemPrompt: "test",
+    messages: [{ role: "user", content: "hi" }, FOREIGN_TURN, { role: "user", content: "again" }],
+    tools: [],
+  });
+  const assistant = body.messages.find((m) => m.role === "assistant");
+  assert.ok(assistant, "the assistant turn must still be sent");
+  const blocks = assistant.content.map((c) => c.type);
+  assert.ok(
+    !blocks.includes("thinking"),
+    `foreign thinking must be dropped (Anthropic 400s on its signature), got ${JSON.stringify(blocks)}`,
+  );
+  // Dropping, not down-converting: replaying reasoning as prose trains the model
+  // to emit chain-of-thought as visible output on later turns.
+  assert.deepEqual(assistant.content, [{ type: "text", text: "ok" }]);
+});
+
+await check("azure-foundry: thinking from the anthropic api IS replayed with its signature", async () => {
+  const body = await captureRequestBody({
+    systemPrompt: "test",
+    messages: [{ role: "user", content: "hi" }, NATIVE_TURN, { role: "user", content: "again" }],
+    tools: [],
+  });
+  const assistant = body.messages.find((m) => m.role === "assistant");
+  const thinking = assistant.content.find((c) => c.type === "thinking");
+  assert.ok(thinking, "native thinking must survive — interleaved thinking needs it across tool turns");
+  assert.equal(thinking.signature, "CAISyAUKwwIIEhgCKkDxyANe");
+});
+
+await check("azure-foundry: a foreign turn does not suppress a later native turn's thinking", async () => {
+  const body = await captureRequestBody({
+    systemPrompt: "test",
+    messages: [
+      { role: "user", content: "hi" },
+      FOREIGN_TURN,
+      { role: "user", content: "again" },
+      NATIVE_TURN,
+      { role: "user", content: "once more" },
+    ],
+    tools: [],
+  });
+  const assistants = body.messages.filter((m) => m.role === "assistant");
+  assert.equal(assistants.length, 2, "both assistant turns are sent");
+  assert.ok(!assistants[0].content.some((c) => c.type === "thinking"), "foreign turn dropped its thinking");
+  assert.ok(assistants[1].content.some((c) => c.type === "thinking"), "native turn kept its thinking");
+});
+
+// ── Transcript-carried system prompt and tools ───────────────────────────────
+// Contract (pi 1.1.0, docs/custom-provider.md): "The stream receives a normalized
+// TranscriptContext. System prompts and tool declarations live in transcript system
+// messages, so read them with getCurrentSystemPrompt(context.messages) and
+// getCurrentTools(context.messages) rather than expecting context.systemPrompt or
+// context.tools." Both are undefined on the context providers actually receive.
+// Reading them directly meant body.tools was never set, so Claude models ran with no
+// tools at all and answered "no executable tools are wired up in this conversation".
+
+const READ_TOOL = {
+  name: "read",
+  description: "Read file contents",
+  parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+};
+const BASH_TOOL = {
+  name: "bash",
+  description: "Execute bash commands",
+  parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+};
+
+/** A pi 1.1.0 transcript: prompt and tools ride on a leading system message. */
+const transcriptContext = (systemMessage, rest = [{ role: "user", content: "hi" }]) => ({
+  messages: [systemMessage, ...rest],
+});
+
+/** Capture the request body azure-openai-models sends, then end the stream cleanly. */
+async function captureOpenAIRequestBody(context) {
+  let sent;
+  globalThis.fetch = async (_url, opts) => {
+    sent = JSON.parse(opts.body);
+    return sseResponse([
+      JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] }),
+    ]);
+  };
+  const stream = await openaiStreamSimple(MODEL, context, {});
+  for await (const _ of stream) { /* drain */ }
+  return sent;
+}
+
+await check("azure-foundry: tools come from the transcript system message", async () => {
+  const body = await captureRequestBody(
+    transcriptContext({
+      role: "system",
+      content: "You are a coding agent.",
+      toolsAdded: [READ_TOOL, BASH_TOOL],
+      timestamp: 1,
+    }),
+  );
+  assert.ok(body.tools, "body.tools must be set — without it the model has no tools at all");
+  assert.deepEqual(body.tools.map((t) => t.name), ["read", "bash"]);
+  assert.equal(body.tools[0].description, "Read file contents");
+  assert.deepEqual(body.tools[0].input_schema, READ_TOOL.parameters);
+});
+
+await check("azure-foundry: system prompt comes from the transcript system message", async () => {
+  const body = await captureRequestBody(
+    transcriptContext({ role: "system", content: "You are a coding agent.", timestamp: 1 }),
+  );
+  assert.ok(body.system?.includes("You are a coding agent."), `got ${JSON.stringify(body.system)}`);
+});
+
+await check("azure-foundry: later system messages patch sections and tool state", async () => {
+  // getCurrentTools replays every delta in order: a removal must win over the
+  // earlier addition, and a later section must reach the prompt.
+  const body = await captureRequestBody({
+    messages: [
+      { role: "system", content: "Base.", sections: { rules: "<rules>a</rules>" }, toolsAdded: [READ_TOOL, BASH_TOOL], timestamp: 1 },
+      { role: "user", content: "hi" },
+      { role: "system", content: "", sections: { rules: "<rules>b</rules>" }, toolsRemoved: [{ name: "bash" }], timestamp: 2 },
+      { role: "user", content: "again" },
+    ],
+  });
+  assert.deepEqual(body.tools.map((t) => t.name), ["read"], "removed tool must not be sent");
+  assert.ok(body.system.includes("<rules>b</rules>"), "later section must replace the earlier one");
+  assert.ok(!body.system.includes("<rules>a</rules>"), "superseded section must be gone");
+  // Anthropic has no mid-conversation system role: collapseSystemMessages folds the
+  // later one into the prompt rather than emitting it as a message.
+  assert.ok(!body.messages.some((m) => m.role === "system"), "no system message in the messages array");
+});
+
+await check("azure-foundry: a transcript with no system message sends no tools and no system", async () => {
+  const body = await captureRequestBody({ messages: [{ role: "user", content: "hi" }] });
+  assert.equal(body.tools, undefined, "omit tools entirely rather than sending an empty array");
+  assert.equal(body.system, undefined);
+});
+
+await check("azure-openai-models: tools and system prompt come from the transcript", async () => {
+  const body = await captureOpenAIRequestBody(
+    transcriptContext({
+      role: "system",
+      content: "You are a coding agent.",
+      toolsAdded: [READ_TOOL, BASH_TOOL],
+      timestamp: 1,
+    }),
+  );
+  assert.deepEqual(body.tools.map((t) => t.function.name), ["read", "bash"]);
+  assert.deepEqual(body.tools[0].function.parameters, READ_TOOL.parameters);
+  const system = body.messages.find((m) => m.role === "system");
+  assert.ok(system, "the system prompt must be sent as the leading system message");
+  assert.ok(system.content.includes("You are a coding agent."));
+  assert.equal(body.messages.filter((m) => m.role === "system").length, 1, "exactly one system message");
 });
 
 // Restore network-disabled stub for any future checks.
