@@ -21,6 +21,12 @@ Anthropic-compatible provider for Claude models deployed through Azure AI Foundr
 
 Auth uses Entra ID via `az cli`.
 
+**The system prompt and tool declarations are read from the transcript, not from `context`.** Pi 1.1.0 hands `streamSimple` a normalized `TranscriptContext` that carries only `messages`; `context.systemPrompt` and `context.tools` are both `undefined`. The prompt and the tool schemas ride on transcript system messages instead, so both Azure extensions call `collapseSystemMessages()`, `getCurrentSystemPrompt()`, and `getCurrentTools()` from `@earendil-works/pi-ai` (the pattern pi's own `examples/extensions/custom-provider-anthropic` uses, documented in pi's `docs/custom-provider.md`). Reading the old fields meant `body.tools` was never set: Claude models ran with **zero tools** and answered "no executable tools are wired up in this conversation," while Valar — which uses pi's built-in `openai-completions` implementation rather than a custom `streamSimple` — had tools all along. Both Azure APIs take a single leading system prompt and have no mid-conversation system role, so later system messages are collapsed into the first one rather than emitted as messages.
+
+Pi aliases the bare specifier `@earendil-works/pi-ai` to its bundled `compat` entrypoint for every extension it loads. Node cannot resolve it on its own — the package lives inside pi's managed install, off the extensions directory's `node_modules` chain — so `ts-resolve-hook.mjs` reproduces that alias for the test runner by reading `~/.pi/agent/install/current-version`, the same file pi's launcher uses.
+
+**Thinking blocks are only replayed when the turn came from the Anthropic API.** pi tags every assistant message with the API that produced it (`message.api`). Anthropic validates the `signature` on any replayed `thinking` block, and other providers put a placeholder in that field — valar/Kimi writes the literal string `"reasoning"` — so replaying one returns `400 invalid_request_error: Invalid \`signature\` in \`thinking\` block`. The offending turn stays in history, so a single foreign thinking block makes *every* later request in the session fail; switching from another provider to a Claude model mid-session used to break the rest of the session this way. Foreign thinking blocks are now dropped rather than down-converted to text, because replaying reasoning as prose teaches the model to emit its chain of thought as visible output on later turns. Signed blocks from Anthropic turns still replay normally, which interleaved thinking needs across tool-use turns.
+
 Model specs (`MODEL_SPECS`) are sourced from pi-ai's bundled `anthropic.json` catalog — context window, max tokens, reasoning flag, cost, `thinkingLevelMap`, and adaptive-thinking mode all match the catalog entry for each model. A regression test (`azure-model-specs.test.mjs`) asserts field-by-field parity to prevent drift. Unknown Claude deployments emit a console warning instead of silently degrading to defaults.
 
 ### `lifecycle-guards/`
@@ -38,26 +44,16 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 - `.hook-state/last_design_gate.json`
 - `reports/session-audit.log`
 
-**Interaction with plan-mode:** Both extensions listen to `tool_call`. Plan-mode returns early when not in plan mode. When plan mode is active, both handlers run — if either blocks, the tool is blocked. The command policy here is a subset of plan-mode's restrictions, so plan-mode's stricter checks block first.
-
 **Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (56 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (35 assertions across all five hooks, including command-policy parity, per-file gate tracking, and cross-session staleness).
 
 ### Test files
 
 | File | Checks | What it guards |
 |---|---|---|
-| `azure-stream-result.test.mjs` | 23 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff; stop-reason mapping; pending fallback for partial streams |
+| `azure-stream-result.test.mjs` | 31 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff; stop-reason mapping; pending fallback for partial streams; cross-API thinking-block replay; transcript-carried system prompt and tool declarations |
 | `lifecycle-guards/lifecycle-guards.test.mjs` | 56 | Pure-logic unit tests for all guard rules |
 | `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
-
-### `plan-mode/`
-Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details.
-
-### `zz-auto-continue/`
-Queues a continuation message after non-retrying compaction so the agent keeps going without manual "continue." Circuit breaker: max 5 auto-continues per user-initiated run.
-
-**Interaction with plan-mode on compaction:** The `zz-` prefix ensures this extension loads after `plan-mode` (extensions load in directory-name order). In plan-mode *execution* sessions, both extensions queue a continuation on `session_compact`. The `hasPendingMessages()` guard in zz-auto-continue does NOT detect plan-mode's queued message because plan-mode uses `pi.sendMessage()` (custom-message path) which does not increment `pendingMessageCount`. This double-queue is harmless — both messages are "continue" variants, the agent processes them in order, and both extensions have circuit breakers. The guard is kept as a best-effort skip for extensions that use `pi.sendUserMessage()` (which does increment `pendingMessageCount`).
 
 ### `azure-openai-models.ts`
 OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed as serverless MaaS on Azure AI Foundry.
@@ -67,7 +63,7 @@ OpenAI-compatible provider for non-Claude models (DeepSeek, Kimi, etc.) deployed
 - `AZURE_FOUNDRY_OPENAI_MODEL_DEEPSEEK_ID` — Deployment ID for DeepSeek model
 - `AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID` — Deployment ID for Kimi model
 
-Auth uses Entra ID via `az cli`. Models are defined statically — add new deployments by editing the `MODELS` array in the source. Kimi's `thinkingLevelMap` uses explicit `null` values for unsupported levels (minimal, xhigh, max) so pi's UI only offers the levels Kimi actually supports. `reasoning_effort` is read from `options.reasoning` (the `SimpleStreamOptions` field), not the internal `reasoningEffort` field that pi-ai's wrapper computes.
+Auth uses Entra ID via `az cli`. Reads the system prompt and tool declarations from the transcript, same as `azure-foundry.ts` above — it had the identical bug. Models are defined statically — add new deployments by editing the `MODELS` array in the source. Kimi's `thinkingLevelMap` uses explicit `null` values for unsupported levels (minimal, xhigh, max) so pi's UI only offers the levels Kimi actually supports. `reasoning_effort` is read from `options.reasoning` (the `SimpleStreamOptions` field), not the internal `reasoningEffort` field that pi-ai's wrapper computes.
 
 ## Setting Up on a New Machine
 

@@ -1,5 +1,8 @@
 # my-agent-config
 
+> **On branch `praveen-configs`:** this is a point-in-time snapshot of Praveen's
+> pi config, not a line of development. Do not merge it. See [PRAVEEN-CONFIG.md](PRAVEEN-CONFIG.md).
+
 Personal agent configuration — skills, commands, rules, and settings — synced across machines. Primary target is Claude Code (`~/.claude`); skills and extensions are also synced for the Pi coding agent, and Codex reads `AGENTS.md` directly.
 
 ## Quick Start
