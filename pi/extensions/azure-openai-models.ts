@@ -10,6 +10,7 @@
 //   AZURE_FOUNDRY_OPENAI_MODEL_GROQ_ID       Deployment ID for Groq model (optional)
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { collapseSystemMessages, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { getAzureToken } from "./lib/azure-token";
 import { fetchWithTransientRetry, readRetryConfig } from "./lib/transient-retry";
 
@@ -36,9 +37,11 @@ function getAccessToken(): string {
 // the model's supported set before delegating to stream(). Our extension is called
 // directly by provider-composer.js with the raw SimpleStreamOptions, bypassing that
 // wrapper, so we must clamp ourselves. The logic mirrors pi-ai's getSupportedThinkingLevels
-// and clampThinkingLevel (dist/models.js) exactly — keeping it inline avoids a runtime
-// dependency on @earendil-works/pi-ai which is only resolvable via jiti aliases at
-// pi load time, not from the test environment.
+// and clampThinkingLevel (dist/models.js) exactly. The original reason for inlining —
+// that pi-ai was unreachable from the test environment — no longer holds now that the
+// transcript helpers above are imported from it, and both functions are in fact
+// exported from the same entrypoint. The copy is kept only to avoid an unrelated
+// change; replacing it with the imports is safe whenever someone touches this block.
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 function getSupportedThinkingLevels(model: any): string[] {
@@ -129,14 +132,14 @@ const MODELS = GROQ_MODEL ? [...BASE_MODELS, GROQ_MODEL] : BASE_MODELS;
 
 // ── Message conversion ───────────────────────────────────────────────────────
 
-function convertMessages(context: any): any[] {
+function convertMessages(messages: any[], systemPrompt: string): any[] {
   const params: any[] = [];
 
-  if (context.systemPrompt) {
-    params.push({ role: "system", content: context.systemPrompt });
+  if (systemPrompt) {
+    params.push({ role: "system", content: systemPrompt });
   }
 
-  for (const msg of context.messages ?? []) {
+  for (const msg of messages) {
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
         params.push({ role: "user", content: msg.content });
@@ -219,8 +222,14 @@ function streamAzureOpenAI(model: any, context: any, options: any) {
     };
     finalMessage = output;
     try {
-      const messages = convertMessages(context);
-      const tools = convertTools(context.tools);
+      // pi 1.1.0 hands providers a normalized TranscriptContext carrying only
+      // `messages`; the system prompt and tool declarations live in transcript
+      // system messages, so `context.systemPrompt`/`context.tools` are undefined.
+      // Reading them directly sent every request with no tools and no prompt.
+      // This API has no mid-conversation system role, so collapse first.
+      const transcript = collapseSystemMessages(context);
+      const messages = convertMessages(transcript.messages, getCurrentSystemPrompt(transcript.messages));
+      const tools = convertTools(getCurrentTools(transcript.messages));
 
       const body: any = {
         model: model.id,
