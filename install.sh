@@ -157,6 +157,10 @@ sync_directories() {
     [ -d "$local_path" ] && for d in "$local_path"/*/; do
         [ -d "$d" ] && {
             name="$(basename "$d")"
+            # Skip Claude Code's account skill-sync cache (~/.claude/skills/synced).
+            # It's provider-managed (tengu sync), not user-authored, and never
+            # belongs in this repo — including it only adds noise to every status run.
+            [ "$name" = "synced" ] && continue
             # Add only if not already in list
             if [[ ! " ${all_names[*]:-} " =~ " $name " ]]; then
                 all_names+=("$name")
