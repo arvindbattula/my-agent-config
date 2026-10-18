@@ -99,6 +99,9 @@
       }
     ]
   },
+  "env": {
+    "CLAUDE_CODE_AUTO_MODE_SERVER": "0"
+  },
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.sh"
@@ -117,5 +120,5 @@
   "skipAutoPermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "theme": "light",
-  "model": "sonnet"
+  "model": "opus"
 }
