@@ -80,22 +80,6 @@
                     }
                 },
                 {
-                    "id": "deepseek-ai/DeepSeek-V4-Flash",
-                    "name": "DeepSeek-V4-Flash-0731",
-                    "reasoning": true,
-                    "input": [
-                        "text"
-                    ],
-                    "contextWindow": 1048576,
-                    "maxTokens": 65536,
-                    "cost": {
-                        "input": 0.088,
-                        "output": 0.264,
-                        "cacheRead": 0.0028,
-                        "cacheWrite": 0
-                    }
-                },
-                {
                     "id": "deepseek-ai/DeepSeek-V4-Pro",
                     "name": "DeepSeek-V4-Pro-0813",
                     "reasoning": true,
@@ -108,6 +92,40 @@
                         "input": 0.528,
                         "output": 1.584,
                         "cacheRead": 0.0176,
+                        "cacheWrite": 0
+                    }
+                },
+                {
+                    "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+                    "name": "DeepSeek-V4.1-Flash",
+                    "reasoning": true,
+                    "input": [
+                        "text",
+                        "image"
+                    ],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                    "cost": {
+                        "input": 0.1275,
+                        "output": 0.51,
+                        "cacheRead": 0.01275,
+                        "cacheWrite": 0
+                    }
+                },
+                {
+                    "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+                    "name": "DeepSeek-V4.1-Flash (1017)",
+                    "reasoning": true,
+                    "input": [
+                        "text",
+                        "image"
+                    ],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                    "cost": {
+                        "input": 0.1275,
+                        "output": 0.51,
+                        "cacheRead": 0.01275,
                         "cacheWrite": 0
                     }
                 },
@@ -142,6 +160,22 @@
                         "input": 0.07,
                         "output": 0.2,
                         "cacheRead": 0.03,
+                        "cacheWrite": 0
+                    }
+                },
+                {
+                    "id": "meta-models/Muse-Spark-Open",
+                    "name": "Muse Spark Open",
+                    "reasoning": true,
+                    "input": [
+                        "text"
+                    ],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                    "cost": {
+                        "input": 0.625,
+                        "output": 2.125,
+                        "cacheRead": 0.075,
                         "cacheWrite": 0
                     }
                 },
@@ -246,6 +280,23 @@
                     }
                 },
                 {
+                    "id": "valar-auto-balanced",
+                    "name": "Valar Auto-Router: Coding Balanced",
+                    "reasoning": false,
+                    "input": [
+                        "text",
+                        "image"
+                    ],
+                    "contextWindow": 1000000,
+                    "maxTokens": 65536,
+                    "cost": {
+                        "input": 0,
+                        "output": 0,
+                        "cacheRead": 0,
+                        "cacheWrite": 0
+                    }
+                },
+                {
                     "id": "zai-org/GLM-5.2",
                     "name": "GLM-5.2",
                     "reasoning": true,
@@ -307,6 +358,22 @@
                         "input": 0.06,
                         "output": 0.2,
                         "cacheRead": 0.0116,
+                        "cacheWrite": 0
+                    }
+                },
+                {
+                    "id": "zai-org/GLM-5.3-fast",
+                    "name": "GLM-5.3 Fast",
+                    "reasoning": true,
+                    "input": [
+                        "text"
+                    ],
+                    "contextWindow": 1048576,
+                    "maxTokens": 65536,
+                    "cost": {
+                        "input": 0.8925,
+                        "output": 2.805,
+                        "cacheRead": 0.16575,
                         "cacheWrite": 0
                     }
                 }
