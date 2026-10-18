@@ -17,5 +17,8 @@
   },
   "packages": [
     "npm:@luxusai/pi-hindsight"
+  ],
+  "defaultTools": [
+    "+codemode"
   ]
 }
