@@ -235,8 +235,18 @@ export default function (pi: ExtensionAPI) {
 						// Pi-style context display: "42%/200k (auto)", or "?/200k
 						// (auto)" right after compaction when tokens are unknown
 						// until the next LLM response. Note: getSettings() is on the
-						// ExtensionAPI (pi), not on the session ctx.
-						const autoCompact = pi.getSettings().compaction?.enabled !== false ? " (auto)" : "";
+						// ExtensionAPI (pi) only in pi-coding-agent >= 1.x —
+						// feynman 0.3.48 bundles 0.84.2, which lacks it. Guard
+						// the call; when unavailable, default to " (auto)"
+						// (pi's default: compaction enabled).
+						const piWithSettings = pi as ExtensionAPI & {
+							getSettings?: () => { compaction?: { enabled?: boolean } };
+						};
+						const compactionEnabled =
+							typeof piWithSettings.getSettings === "function"
+								? piWithSettings.getSettings().compaction?.enabled
+								: undefined;
+						const autoCompact = compactionEnabled !== false ? " (auto)" : "";
 						const pctText =
 							percent !== null
 								? `${percent.toFixed(1)}%/${formatTokens(contextWindow)}${autoCompact}`

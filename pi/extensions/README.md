@@ -55,6 +55,8 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | `lifecycle-guards/lifecycle-guards.test.mjs` | 56 | Pure-logic unit tests for all guard rules |
 | `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
+| `session-stats.test.mjs` | — | `computeSessionTotals` cost/token totals parity with pi's `getUsageCostBreakdown`; `formatTokens`/`sanitizeStatusText` |
+| `statusline.test.mjs` | 5 | `render()` does not crash when ExtensionAPI lacks `getSettings()` (feynman's bundled pi 0.84.x); ` (auto)` marker honors `compaction.enabled` when present. Uses `statusline-test-hook.mjs` to alias `@earendil-works/pi-tui` |
 
 ### `plan-mode/`
 Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details.
@@ -120,6 +122,14 @@ Pi caches extension module factories **in memory, per process** (loader's `exten
 ## Known Drift & Decisions
 
 Documented deliberately rather than left as tribal knowledge. Revisit when pi upgrades or requirements change.
+
+### statusline.ts crashed feynman: unguarded `pi.getSettings()` (fixed 2026-10-21)
+
+`statusline.ts` called `pi.getSettings().compaction?.enabled` unguarded. `getSettings()` exists on the ExtensionAPI only in pi-coding-agent >= 1.x; feynman 0.3.48 bundles exactly 0.84.2 (its only published version), which lacks it. Because the call sat inside `render()` — invoked from pi-tui's render timer callback — the TypeError became an uncaughtException and killed the whole process (`feynman exiting due to uncaughtException`).
+
+**Fixed:** the call is now guarded (`typeof pi.getSettings === "function"`), falling back to the ` (auto)` default (pi's default: compaction enabled) when settings are unavailable. Regression coverage in `statusline.test.mjs` (5 cases: getSettings absent + four compaction variants); it resolves `@earendil-works/pi-tui` via `statusline-test-hook.mjs`.
+
+**Lesson:** extensions are developed against the global pi CLI (1.x) but run under feynman's bundled pi (0.84.x) — the two can differ by a major version. Any new `pi.<method>` call should be checked against the *bundled* `createExtensionAPI` in `<feynman app>/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js`, or guarded. This applies to any pi-bundling app, not just feynman.
 
 ### ~~MODEL_SPECS claude-sonnet-4-5 context window disagrees with pi's catalog~~ (RESOLVED 2026-10-20)
 
