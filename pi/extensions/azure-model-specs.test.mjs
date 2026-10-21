@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
 import { execSync } from "node:child_process";
 
 // Resolve extensionless relative imports inside the .ts extensions.
@@ -36,8 +36,13 @@ const { MODEL_SPECS } = await import("./azure-foundry.ts");
 function findCatalog() {
   const piBin = execSync("which pi", { encoding: "utf-8" }).trim();
   const cliPath = realpathSync(piBin);
-  // dist/cli.js -> package root
-  const pkgDir = dirname(dirname(cliPath));
+  // Walk up from the binary to the package root. The pi binary has moved
+  // between dist/cli.js and dist/bundle/cli.js across versions, so a fixed
+  // dirname(dirname(cliPath)) lands one level short.
+  let pkgDir = dirname(cliPath);
+  while (!existsSync(join(pkgDir, "package.json"))) {
+    pkgDir = dirname(pkgDir);
+  }
   const catalogPath = resolve(
     pkgDir,
     "node_modules/@earendil-works/pi-ai/dist/providers/data/anthropic.json",
@@ -57,14 +62,17 @@ const check = (name, fn) => { fn(); passed++; console.log(`  ok - ${name}`); };
 
 for (const id of Object.keys(MODEL_SPECS)) {
   check(`MODEL_SPECS["${id}"] exists in anthropic.json`, () => {
-    assert.ok(catalog[id], `No catalog entry for "${id}" — MODEL_SPECS has a model pi doesn't know about`);
+    // pi >= 1.3 namespaces catalog keys by model type ("chat:<id>"); try
+    // both spellings so this works across catalog formats.
+    assert.ok(catalog[id] ?? catalog[`chat:${id}`], `No catalog entry for "${id}" — MODEL_SPECS has a model pi doesn't know about`);
   });
 }
 
 // ── Field-by-field parity ─────────────────────────────────────────────────────
 
+const catalogEntry = (id) => catalog[id] ?? catalog[`chat:${id}`];
 for (const [id, spec] of Object.entries(MODEL_SPECS)) {
-  const cat = catalog[id];
+  const cat = catalogEntry(id);
 
   check(`"${id}" contextWindow matches`, () => {
     assert.equal(spec.contextWindow, cat.contextWindow,

@@ -5,14 +5,20 @@
  * extension API allows. Renders a two-line footer:
  *
  *   [model] 📁 dir (branch | N files +A -R) | ⚙ thinking
- *   ████████░░ 42% (12k) | $0.34 | ⏱️ 3m 12s
+ *   ████████░░ 42%/200k (auto) ↑4k ↓12k R900k CH75% | $0.34 | ⏱️ 3m 12s
  *
  * Data-source notes (flagged assumptions):
- * - Cost: summed from ALL session entries (assistant, toolResult, compaction,
+ * - Cost + token stats: aggregated from ALL session entries (assistant,
+ *   toolResult, standalone `usage` entries such as cache_warm, compaction,
  *   branch_summary) via getEntries(), matching pi's built-in footer and
  *   /stats. Previously scoped to getBranch() and assistant-only, which
- *   undercounted after compaction and missed tool/summary usage.
- * - Context %/tokens: from ctx.getContextUsage() (Pi's own estimate).
+ *   undercounted after compaction and missed tool/summary/cache-warm usage.
+ *   Memoized on (sessionId, leafId, entryCount, model) like pi's
+ *   getSessionStats() — entry count alone goes stale after /fork or a model
+ *   switch.
+ * - Context %: from ctx.getContextUsage() (Pi's own estimate), rendered
+ *   pi-style as "42%/200k (auto)" — or "?/200k" right after compaction,
+ *   when tokens are unknown until the next LLM response.
  * - Duration: wall-clock since session_start. Pi does not expose a
  *   cumulative request-duration counter like Claude Code's
  *   cost.total_duration_ms, so this is elapsed session time instead.
@@ -24,11 +30,11 @@
  * to avoid spawning git on every render.
  */
 
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
+import { computeSessionTotals, formatTokens, sanitizeStatusText, type SessionTotals } from "./lib/session-stats";
 
 interface GitStats {
 	branch: string;
@@ -80,10 +86,6 @@ function shortenDir(cwd: string): string {
 	return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
 }
 
-function formatTokens(tokens: number): string {
-	return `${Math.floor(tokens / 1000)}k`;
-}
-
 function formatDuration(ms: number): string {
 	const mins = Math.floor(ms / 60000);
 	const secs = Math.floor((ms % 60000) / 1000);
@@ -108,13 +110,13 @@ export default function (pi: ExtensionAPI) {
 		// refresh immediately (no cold-start flicker of missing branch stats).
 		let gitCache: { ts: number; stats: GitStats | null } = { ts: -Infinity, stats: null };
 		let gitInFlight = false;
-		// Memoize cost: getEntries() is O(n) and render() fires on every text
-		// delta. Recompute only when the entry count changes. Aggregates over
-		// ALL session entries (assistant, toolResult, compaction, branch_summary)
-		// to match pi's built-in footer and /stats — not just assistant messages
-		// on the current branch, which undercounted after compaction and missed
-		// tool/summary usage.
-		let costCache = { entries: -1, total: 0 };
+		// Memoize session stats: getEntries() is O(n) and render() fires on
+		// every text delta. Recompute only when the key changes. Keyed like
+		// pi's footer getSessionStats(): (sessionId, leafId, entryCount,
+		// model) — entry count alone goes stale after /fork or a model
+		// switch, and the model determines the context window the stats
+		// apply to.
+		let statsCache: { key: string; totals: SessionTotals } | null = null;
 
 		ctx.ui.setFooter(
 			(
@@ -154,30 +156,29 @@ export default function (pi: ExtensionAPI) {
 						}
 						const stats = gitCache.stats;
 
-						// Cost from ALL session entries (memoized). Mirrors pi's footer.js
-						// and getSessionStats(): assistant + toolResult messages, plus
-						// compaction and branch_summary entries. Using getEntries()
-						// (full session) not getBranch() (current path only) so cost
-						// survives compaction — getBranch() drops everything compacted away.
+						// Session stats (memoized): aggregated over ALL session
+						// entries — assistant + toolResult messages, standalone
+						// `usage` entries (cache_warm), compaction and
+						// branch_summary — mirroring pi's footer.js
+						// getSessionStats(). getEntries() is the full session,
+						// not getBranch(), so totals survive compaction
+						// (getBranch() drops everything compacted away).
 						const allEntries = ctx.sessionManager.getEntries();
-						if (allEntries.length !== costCache.entries) {
-							let total = 0;
-							for (const entry of allEntries) {
-								if (entry.type === "message" && entry.message.role === "assistant") {
-									total += (entry.message as AssistantMessage).usage.cost.total;
-								} else if (entry.type === "message" && entry.message.role === "toolResult" && (entry.message as any).usage) {
-									total += (entry.message as any).usage.cost.total;
-								} else if ((entry.type === "compaction" || entry.type === "branch_summary") && (entry as any).usage) {
-									total += (entry as any).usage.cost.total;
-								}
-							}
-							costCache = { entries: allEntries.length, total };
+						const cacheKey = [
+							ctx.sessionManager.getSessionId(),
+							ctx.sessionManager.getLeafId(),
+							allEntries.length,
+							`${ctx.model?.provider ?? "?"}/${ctx.model?.id ?? "?"}`,
+						].join("|");
+						if (statsCache === null || statsCache.key !== cacheKey) {
+							statsCache = { key: cacheKey, totals: computeSessionTotals(allEntries) };
 						}
-						const cost = costCache.total;
+						const totals = statsCache.totals;
 
 						const usage = ctx.getContextUsage();
-						const tokens = usage?.tokens ?? 0;
-						const percent = usage?.percent ?? 0;
+						const contextWindow = usage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+						// null = unknown (right after compaction, before the next LLM response).
+						const percent = usage?.percent ?? null;
 
 						const modelName = ctx.model?.name ?? "?";
 						const dir = shortenDir(ctx.cwd);
@@ -208,10 +209,16 @@ export default function (pi: ExtensionAPI) {
 
 						// Extension status indicators (e.g. plan-mode's "⏸ plan").
 						// setStatus() writes here; a custom footer must render them itself.
+						// Sanitized (a control char in a status would corrupt the
+						// footer layout) and sorted alphabetically by extension
+						// key, matching pi's built-in footer.
 						let extSeg = "";
 						const statuses = footerData.getExtensionStatuses();
 						if (statuses.size > 0) {
-							const parts = [...statuses.values()].filter((v) => v && v.length > 0);
+							const parts = [...statuses.entries()]
+								.sort(([a], [b]) => a.localeCompare(b))
+								.map(([, v]) => sanitizeStatusText(v ?? ""))
+								.filter((v) => v.length > 0);
 							if (parts.length > 0) {
 								extSeg = ` ${theme.fg("dim", "|")} ${parts.join(" ")}`;
 							}
@@ -223,15 +230,38 @@ export default function (pi: ExtensionAPI) {
 							thinkingSeg +
 							extSeg;
 
-						// --- Line 2: context bar, %, tokens, cost, duration ---
-						const bar = buildBar(percent, theme);
-						const pct = theme.fg("text", `${Math.floor(percent)}%`);
-						const tok = theme.fg("dim", `(${formatTokens(tokens)})`);
-						const costStr = theme.fg("warning", `$${cost.toFixed(2)}`);
+						// --- Line 2: context bar, %/window (auto), token stats, cost, duration ---
+						const bar = buildBar(percent ?? 0, theme);
+						// Pi-style context display: "42%/200k (auto)", or "?/200k
+						// (auto)" right after compaction when tokens are unknown
+						// until the next LLM response. Note: getSettings() is on the
+						// ExtensionAPI (pi), not on the session ctx.
+						const autoCompact = pi.getSettings().compaction?.enabled !== false ? " (auto)" : "";
+						const pctText =
+							percent !== null
+								? `${percent.toFixed(1)}%/${formatTokens(contextWindow)}${autoCompact}`
+								: `?/${formatTokens(contextWindow)}${autoCompact}`;
+						const pctColor =
+							percent === null ? "text" : percent > 90 ? "error" : percent > 70 ? "warning" : "text";
+						const pct = theme.fg(pctColor, pctText);
+
+						// Token breakdown + cache-hit rate, matching pi's footer
+						// stats line: only non-zero parts, CH only when there is
+						// cache activity.
+						const statParts: string[] = [];
+						if (totals.input > 0) statParts.push(`↑${formatTokens(totals.input)}`);
+						if (totals.output > 0) statParts.push(`↓${formatTokens(totals.output)}`);
+						if (totals.cacheRead > 0) statParts.push(`R${formatTokens(totals.cacheRead)}`);
+						if (totals.cacheWrite > 0) statParts.push(`W${formatTokens(totals.cacheWrite)}`);
+						if (totals.cacheRead + totals.cacheWrite > 0 && totals.cacheHitRate !== null) {
+							statParts.push(`CH${totals.cacheHitRate.toFixed(1)}%`);
+						}
+						const tok = statParts.length > 0 ? theme.fg("dim", statParts.join(" ")) : "";
+						const costStr = theme.fg("warning", `$${totals.cost.toFixed(2)}`);
 						const dur = theme.fg("text", `⏱️ ${formatDuration(Date.now() - sessionStart)}`);
 						const sep = theme.fg("dim", "|");
 
-						const line2 = `${bar} ${pct} ${tok} ${sep} ${costStr} ${sep} ${dur}`;
+						const line2 = `${bar} ${pct}${tok ? ` ${tok}` : ""} ${sep} ${costStr} ${sep} ${dur}`;
 
 						return [truncateToWidth(line1, width), truncateToWidth(line2, width)];
 					},

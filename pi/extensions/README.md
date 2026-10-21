@@ -8,7 +8,12 @@ Extensions for the [Pi coding agent](https://github.com/earendil-works/pi-coding
 Shared Entra ID token acquisition utility used by both Azure extensions. Caches tokens per resource with automatic refresh. Not a standalone provider — imported by the other extensions. Lives under `lib/` on purpose: pi auto-loads **every top-level file** in `extensions/` as an extension (each must export a default factory), so shared helpers must sit in a subdirectory. A subdir without an `index.ts` or a pi-manifest `package.json` is ignored by pi's loader but stays importable (e.g. `from "./lib/azure-token"`).
 
 ### `statusline.ts`
-Two-line status bar footer showing model, directory, git branch + diff stats, thinking level, context usage, tokens, cost, and session elapsed time.
+Two-line status bar footer showing model, directory, git branch + diff stats, thinking level, and a stats line with context usage (`42%/200k (auto)` — or `?/200k` right after compaction), token breakdown (`↑ ↓ R W`), cache-hit rate (`CH%`), cost, and session elapsed time.
+
+Cost and token stats aggregate over **all** session entries — assistant, toolResult, standalone `usage` entries (e.g. cache warming), compaction, and branch_summary — matching pi's built-in footer and `/stats`, and are memoized on `(sessionId, leafId, entryCount, model)` like pi's `getSessionStats()` (entry count alone goes stale after `/fork` or a model switch). Extension statuses are sanitized (control chars stripped) and sorted alphabetically, matching pi's built-in footer.
+
+### `lib/session-stats.ts`
+Pure helpers for `statusline.ts` — usage aggregation, compact token formatting, status-text sanitization. Lives under `lib/` so pi's auto-loader ignores it (see the `lib/azure-token.ts` note) and it stays unit-testable standalone: `session-stats.test.mjs` asserts cost/token parity against pi's own `getUsageCostBreakdown` (the `/stats` oracle) over a synthetic session containing every usage-bearing entry type, including `cache_warm`.
 
 ### `azure-foundry.ts`
 Anthropic-compatible provider for Claude models deployed through Azure AI Foundry. Discovers models dynamically via ARM API at startup; falls back to a local cache when ARM is unreachable.
