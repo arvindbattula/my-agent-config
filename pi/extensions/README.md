@@ -102,9 +102,39 @@ az login
 - **Cost data is public list pricing.** Per-token rates are sourced from Anthropic's published pricing and are estimates only. Actual Azure contract rates may differ.
 - **Non-Claude models are statically defined.** Unlike Claude models (discovered dynamically via ARM API), DeepSeek/Kimi models in `azure-openai-models.ts` are defined in a static `MODELS` array. This is deliberate — these models use a different API path (OpenAI-compat vs Anthropic) and their deployment list is small and stable. To add a new non-Claude model, edit the `MODELS` array and re-sync.
 
+## Extension Reload Semantics (read before debugging "my change didn't take")
+
+Pi caches extension module factories **in memory, per process** (loader's `extensionCache`, keyed by resolved path). Consequences:
+
+- A pi process started before an extension file changed keeps running the **old** code until the process exits. This conversation/debugging session included: edits synced at 22:23 were invisible to a pi started at 22:06.
+- `/new`, `/resume`, `/fork` create new sessions in the **same process** — they do **not** re-import extension files. Only a full `pi` restart (quit + relaunch, per terminal tab) picks up extension changes.
+- `pi list` lists installed extensions from settings; it does not tell you which code version a running process has loaded. Check `ps -o lstart -p <pid>` against the extension file's mtime instead.
+
+**Verifying statusline/footer changes:**
+
+- `PI_OFFLINE=1 pi --print --no-session "reply ok"` is a cheap load smoke test — extensions load at startup, so an import/syntax error surfaces before the model call.
+- The footer render path needs a UI: `printf '/quit\r' | script -q /tmp/capture.txt pi --no-session` (feed it a few seconds first) renders the real footer in a PTY; grep the capture for tell-tale strings.
+- `osascript -e 'tell application "Terminal" ... contents of tab'` reads another tab's visible screen — useful to check what a *different* running session actually displays.
+- A **fresh** session renders almost no new markers: the token breakdown (`↑ ↓ R W`) and `CH%` are non-zero-only (matching pi's footer) and cost is `$0.00`. The fresh-session tell-tale is `0.0%/1.0M (auto)` (new) vs `0% (0k)` (old). Send one message before judging the display.
+
 ## Known Drift & Decisions
 
 Documented deliberately rather than left as tribal knowledge. Revisit when pi upgrades or requirements change.
+
+### MODEL_SPECS claude-sonnet-4-5 context window disagrees with pi's catalog
+
+`MODEL_SPECS["claude-sonnet-4-5"]` in `azure-foundry.ts` declares `contextWindow: 1000000`; pi-ai's bundled `anthropic.json` catalog says `200000` for that model. `azure-model-specs.test.mjs` — after its 2026-10-20 repairs (see below) — fails on exactly this field.
+
+**Decision pending.** Either pin MODEL_SPECS to 200k for catalog parity, or keep 1M if the Azure AI Foundry deployment genuinely serves the 1M-context variant — in which case the test needs a documented exception for this model. Anthropic's standard Sonnet 4.5 context is 200k (1M was a beta); verify what the actual Azure deployment accepts before deciding.
+
+### azure-model-specs.test.mjs had silently broken (repaired 2026-10-20)
+
+The MODEL_SPECS parity test had been failing to find the catalog at all — undetected across pi updates — for two reasons, both repaired in commit 9ad8ef3:
+
+1. The `pi` binary moved from `dist/cli.js` to `dist/bundle/cli.js`, so its fixed `dirname(dirname(realpath))` package-root resolution landed one level short. Now walks up to the nearest `package.json`.
+2. pi-ai's `anthropic.json` catalog keys are now namespaced `chat:<id>` (e.g. `chat:claude-haiku-4-5`); the test now tries both spellings.
+
+Because the test was dead, MODEL_SPECS drift went undetected. Lesson: run `node pi/extensions/*.test.mjs` after every pi update, not only after editing extensions.
 
 ### Valar has no retry coverage
 
