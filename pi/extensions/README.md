@@ -121,11 +121,11 @@ Pi caches extension module factories **in memory, per process** (loader's `exten
 
 Documented deliberately rather than left as tribal knowledge. Revisit when pi upgrades or requirements change.
 
-### MODEL_SPECS claude-sonnet-4-5 context window disagrees with pi's catalog
+### ~~MODEL_SPECS claude-sonnet-4-5 context window disagrees with pi's catalog~~ (RESOLVED 2026-10-20)
 
-`MODEL_SPECS["claude-sonnet-4-5"]` in `azure-foundry.ts` declares `contextWindow: 1000000`; pi-ai's bundled `anthropic.json` catalog says `200000` for that model. `azure-model-specs.test.mjs` — after its 2026-10-20 repairs (see below) — fails on exactly this field.
+`MODEL_SPECS["claude-sonnet-4-5"]` in `azure-foundry.ts` declared `contextWindow: 1000000` while pi-ai's bundled `anthropic.json` catalog said `200000` for that model, and `azure-model-specs.test.mjs` failed on exactly this field.
 
-**Decision pending.** Either pin MODEL_SPECS to 200k for catalog parity, or keep 1M if the Azure AI Foundry deployment genuinely serves the 1M-context variant — in which case the test needs a documented exception for this model. Anthropic's standard Sonnet 4.5 context is 200k (1M was a beta); verify what the actual Azure deployment accepts before deciding.
+**Resolved:** pinned to `200000` for catalog parity (Anthropic's standard Sonnet 4.5 context is 200k; 1M was a beta). If the Azure AI Foundry deployment is ever confirmed to serve a 1M-context variant, re-pin and add a documented test exception. All 75 parity checks now pass.
 
 ### azure-model-specs.test.mjs had silently broken (repaired 2026-10-20)
 

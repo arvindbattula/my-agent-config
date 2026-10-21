@@ -90,7 +90,7 @@ type Spec = {
 
 export const MODEL_SPECS: Record<string, Spec> = {
   "claude-haiku-4-5":  { contextWindow: 200000, maxTokens: 64000,  reasoning: true,  cost: HAIKU_COST },
-  "claude-sonnet-4-5": { contextWindow: 1000000, maxTokens: 64000,  reasoning: true,  cost: SONNET_COST },
+  "claude-sonnet-4-5": { contextWindow: 200000, maxTokens: 64000,  reasoning: true,  cost: SONNET_COST },
   "claude-sonnet-4-6": { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: SONNET_COST, adaptive: true, thinkingLevelMap: { max: "max" } },
   "claude-opus-4-5":   { contextWindow: 200000, maxTokens: 64000,  reasoning: true,  cost: OPUS_COST },
   "claude-opus-4-6":   { contextWindow: 1000000, maxTokens: 128000, reasoning: true,  cost: OPUS_COST,   adaptive: true, thinkingLevelMap: { max: "max" } },
