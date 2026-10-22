@@ -597,12 +597,12 @@ sync_pi_extensions() {
     local names=()
     while IFS= read -r f; do
         [ -n "$f" ] && names+=("${f#"$REPO_DIR"/pi/extensions/}")
-    done < <(find "$REPO_DIR/pi/extensions" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' -o -name '*.mjs' \) -not -name 'azure-foundry-models.json')
+    done < <(find "$REPO_DIR/pi/extensions" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' -o -name '*.mjs' \) -not -name 'azure-foundry-models.json' -not -path '*node_modules*')
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         local n; n="${f#"$PI_EXTENSIONS"/}"
         [[ " ${names[*]:-} " =~ " $n " ]] || names+=("$n")
-    done < <(find "$PI_EXTENSIONS" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' \) -not -name 'azure-foundry-models.json')
+    done < <(find "$PI_EXTENSIONS" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' -o -name '*.mjs' \) -not -name 'azure-foundry-models.json' -not -path '*node_modules*')
 
     IFS=$'\n' names=($(sort <<<"${names[*]:-}")); unset IFS
 
