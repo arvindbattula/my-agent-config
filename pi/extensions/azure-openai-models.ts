@@ -10,7 +10,14 @@
 //   AZURE_FOUNDRY_OPENAI_MODEL_GROQ_ID       Deployment ID for Groq model (optional)
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { clampThinkingLevel } from "@earendil-works/pi-ai/models";
+// Import from the pi-ai ROOT specifier, not the "/models" subpath.
+// The subpath only resolves in pi-coding-agent >= 1.4.0 (loader-alias fix,
+// #11156); in Feynman 0.3.48's bundled pi 0.84.2 the root alias maps to
+// dist/compat.js and a "/models" subpath suffix mangles into the nonexistent
+// dist/compat.js/models (extension load crash, 2026-11-04). The root specifier
+// resolves in both: compat.js -> index.js -> models.js re-export chain holds
+// in 0.84.2 and 1.4.0, and clampThinkingLevel lives in models.js in both.
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import { getAzureToken } from "./lib/azure-token";
 import { fetchWithTransientRetry, readRetryConfig } from "./lib/transient-retry";
 
@@ -37,8 +44,8 @@ function getAccessToken(): string {
 // the model's supported set before delegating to stream(). Our extension is called
 // directly by provider-composer.js with the raw SimpleStreamOptions, bypassing that
 // wrapper, so we must clamp ourselves via pi-ai's own clampThinkingLevel.
-// (Importable in extensions since pi 1.4.0's loader-alias fix, #11156; the test
-// environment resolves the same specifier via ts-resolve-hook.mjs.)
+// via pi-ai's own clampThinkingLevel, importable from the root entrypoint
+// (see import note above; works under both the 0.84.2 and 1.4.0 loaders).
 
 // ── Model definitions ────────────────────────────────────────────────────────
 

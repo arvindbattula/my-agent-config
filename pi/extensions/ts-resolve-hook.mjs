@@ -14,18 +14,27 @@ import { piPackageDir } from "./pi-pkg-resolve.mjs";
 // Bare specifier used by azure-openai-models.ts (clampThinkingLevel). The repo
 // has no node_modules, so map it to the active pi install's pi-ai dist — the
 // same resolution pi's extension loader performs via jiti aliases at load time.
-const PI_AI_MODELS_DIST = join(
+//
+// IMPORTANT (2026-11-04): map the ROOT specifier, not "@earendil-works/pi-ai/models".
+// The /models subpath is only aliased by the pi >= 1.4.0 loader (#11156); under
+// feynman 0.3.48's bundled pi-coding-agent 0.84.2 the root alias points to
+// dist/compat.js and a /models subpath suffix mangles into the nonexistent
+// dist/compat.js/models (extension load crash). The extension therefore imports
+// from the root specifier, and this hook mirrors the loader's root alias.
+// compat.js -> index.js -> models.js re-exports clampThinkingLevel in both
+// pi-ai 0.84.2 and 1.4.0.
+const PI_AI_COMPAT_DIST = join(
 	piPackageDir("@earendil-works/pi-ai"),
 	"dist",
-	"models.js",
+	"compat.js",
 );
 
 export async function resolve(specifier, context, next) {
-  if (specifier === "@earendil-works/pi-ai/models") {
-    if (!existsSync(PI_AI_MODELS_DIST)) {
-      throw new Error(`Cannot find pi-ai models dist at ${PI_AI_MODELS_DIST}`);
+  if (specifier === "@earendil-works/pi-ai") {
+    if (!existsSync(PI_AI_COMPAT_DIST)) {
+      throw new Error(`Cannot find pi-ai compat dist at ${PI_AI_COMPAT_DIST}`);
     }
-    return { url: pathToFileURL(PI_AI_MODELS_DIST).href, shortCircuit: true };
+    return { url: pathToFileURL(PI_AI_COMPAT_DIST).href, shortCircuit: true };
   }
   if (specifier.startsWith(".") && !/\.[mc]?[jt]s$/.test(specifier)) {
     const candidate = new URL(specifier + ".ts", context.parentURL);
