@@ -597,7 +597,7 @@ sync_pi_extensions() {
     local names=()
     while IFS= read -r f; do
         [ -n "$f" ] && names+=("${f#"$REPO_DIR"/pi/extensions/}")
-    done < <(find "$REPO_DIR/pi/extensions" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' \) -not -name 'azure-foundry-models.json')
+    done < <(find "$REPO_DIR/pi/extensions" -type f \( -name '*.ts' -o -name '*.md' -o -name '*.json' -o -name '*.mjs' \) -not -name 'azure-foundry-models.json')
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         local n; n="${f#"$PI_EXTENSIONS"/}"
