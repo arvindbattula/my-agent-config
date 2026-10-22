@@ -1,5 +1,109 @@
 {
   "agentPushNotifEnabled": true,
+  "alwaysThinkingEnabled": true,
+  "autoUpdatesChannel": "stable",
+  "effortLevel": "high",
+  "enabledPlugins": {
+    "document-skills@anthropic-agent-skills": true,
+    "jdtls-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true
+  },
+  "env": {
+    "CLAUDE_CODE_AUTO_MODE_SERVER": "0"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/compress-memory.sh",
+            "timeout": 10,
+            "type": "command"
+          },
+          {
+            "command": "bash ~/.claude/hooks/design-antipattern-check.sh",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Write"
+      },
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/design-antipattern-check.sh",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/protect-paths.sh",
+            "timeout": 5,
+            "type": "command"
+          },
+          {
+            "command": "bash ~/.claude/hooks/design-antipattern-prevent.sh",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/command-policy.sh",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/session-end.sh",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/session-start.sh",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "bash ~/.claude/hooks/stop-gate.sh",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "model": "opus",
   "permissions": {
     "allow": [
       "Bash(node:*)",
@@ -11,115 +115,11 @@
       "Bash(pip:*)"
     ]
   },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/session-start.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/protect-paths.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/design-antipattern-prevent.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/command-policy.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/compress-memory.sh",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/design-antipattern-check.sh",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/design-antipattern-check.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/stop-gate.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/session-end.sh",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  },
-  "env": {
-    "CLAUDE_CODE_AUTO_MODE_SERVER": "0"
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/statusline.sh"
-  },
-  "enabledPlugins": {
-    "document-skills@anthropic-agent-skills": true,
-    "typescript-lsp@claude-plugins-official": true,
-    "pyright-lsp@claude-plugins-official": true,
-    "swift-lsp@claude-plugins-official": true,
-    "rust-analyzer-lsp@claude-plugins-official": true,
-    "jdtls-lsp@claude-plugins-official": true
-  },
-  "alwaysThinkingEnabled": true,
-  "effortLevel": "high",
-  "autoUpdatesChannel": "stable",
   "skipAutoPermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
-  "theme": "light",
-  "model": "opus"
+  "statusLine": {
+    "command": "~/.claude/statusline.sh",
+    "type": "command"
+  },
+  "theme": "light"
 }
