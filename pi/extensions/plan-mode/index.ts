@@ -16,11 +16,23 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createBashTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, Text } from "@earendil-works/pi-tui";
+import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { Type } from "typebox";
-import { airgapBlockReason, blockReason, extractTodoItems, markCompletedSteps, type TodoItem } from "./utils.ts";
+import {
+	AIRGAP_DENY_READ,
+	createSandboxedBashOps,
+	ensureSandbox,
+	isSandboxPlatformSupported,
+	isSandboxReady,
+	loadPlanDenyReadConfig,
+	planSandboxConfig,
+	sandboxInitError,
+	teardownSandbox,
+} from "./sandbox.ts";
+import { airgapBlockReason, blockReason, checkHash, extractTodoItems, loadPlanModeConfig, markCompletedSteps, shouldSuggestPlan, type TodoItem } from "./utils.ts";
 
 /** Tool name for the step-completion tool, also used in active-tool management. */
 const PLAN_STEP_DONE_TOOL = "plan_step_done";
@@ -31,6 +43,57 @@ interface PlanStepDoneDetails {
 	completed: number;
 	total: number;
 	next: number | null;
+	/** Phase 3: number of steps whose check passed (verified-done). */
+	verifiedCount?: number;
+	/** Phase 3: true when this call's check FAILED (exit-2 feedback semantics). */
+	checkFailed?: boolean;
+}
+
+/** Phase 3: consecutive failed-check cap per step (Claude Code Stop-hook number). */
+const CHECK_FAIL_CAP = 8;
+
+/**
+ * Phase 3: run a step's check HARNESS-side (node:child_process, NOT the
+ * model's bash tool) — the model cannot fake, intercept, or author the
+ * execution of its own verifier. Detached process group + SIGKILL on timeout,
+ * mirroring pi's bash semantics. Output is capped for tool feedback.
+ */
+function runCheck(command: string, cwd: string, timeoutSec = 120): Promise<{ exitCode: number; output: string }> {
+	return new Promise((resolve) => {
+		try {
+			const child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+			let out = "";
+			let timedOut = false;
+			let timeoutHandle: NodeJS.Timeout | undefined;
+			const killGroup = () => {
+				if (child.pid) {
+					try {
+					process.kill(-child.pid, "SIGKILL");
+				} catch {
+					child.kill("SIGKILL");
+				}
+			}
+		};
+			if (timeoutSec > 0) {
+				timeoutHandle = setTimeout(() => {
+					timedOut = true;
+					killGroup();
+				}, timeoutSec * 1000);
+			}
+			child.stdout?.on("data", (d) => (out += d.toString()));
+			child.stderr?.on("data", (d) => (out += d.toString()));
+			child.on("error", (err) => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				resolve({ exitCode: 127, output: String(err) });
+			});
+			child.on("close", (code) => {
+				if (timeoutHandle) clearTimeout(timeoutHandle);
+				resolve({ exitCode: timedOut ? 124 : (code ?? 1), output: out.slice(0, 4000) });
+			});
+		} catch (e) {
+			resolve({ exitCode: 127, output: String(e) });
+		}
+	});
 }
 
 // Local addition (see AUDIT.md): persist a captured plan to a timestamped
@@ -105,11 +168,67 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	let airgapMode = false; // stricter plan mode: no network, no injected tools, tiny bash core
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
+	/** Phase 3: harness-verified step completion enabled? (from .pi/plan-mode.json; default true) */
+	let verifyStepsOn = true;
 	/** Snapshot of active tools before plan mode was enabled. */
 	let normalModeTools: string[] | null = null;
 	// Dedupe block notifications: skip notifying if the same command was just blocked
 	// (the model often retries a rejected command several times).
 	let lastBlockedCommand: string | null = null;
+
+	// ── Phase 2: kernel sandbox (see sandbox.ts + AUDIT.md) ─────────────
+	// The built-in bash tool is overridden below (extension tools win over
+	// built-ins in pi's tool registry — verified in 1.4.0 agent-session.js).
+	// While plan/airgap mode is active AND the sandbox is healthy, bash runs
+	// through Seatbelt-wrapped operations; otherwise it passes through to
+	// pi's built-in behavior untouched. The Phase 1 regex tool_call handler
+	// stays in front of this as advisory UX.
+	const localCwd = process.cwd();
+	const localBash = createBashTool(localCwd);
+
+	/** Initialize/switch the sandbox policy for the current mode. Called on
+	 * mode entry, mode switch, and session resume — never in normal mode. */
+	async function activateSandboxForMode(ctx: ExtensionContext): Promise<void> {
+		if (pi.getFlag("no-plan-sandbox") === true) {
+			ctx.ui.notify(
+				"Plan-mode kernel sandbox DISABLED via --no-plan-sandbox — running on the regex guardrail only.",
+				"warning",
+			);
+			return;
+		}
+		if (!isSandboxPlatformSupported()) {
+			ctx.ui.notify(
+				`Kernel sandbox unavailable on ${process.platform} — plan mode degrades to the regex guardrail.` +
+					(airgapMode ? " Airgap FAILS CLOSED: bash will be blocked." : ""),
+				airgapMode ? "error" : "warning",
+			);
+			return;
+		}
+		const denyRead = airgapMode ? AIRGAP_DENY_READ : loadPlanDenyReadConfig(ctx.cwd);
+		const ok = await ensureSandbox(planSandboxConfig(denyRead), airgapMode ? "airgap" : "plan");
+		if (!ok) {
+			ctx.ui.notify(
+				`Kernel sandbox init failed: ${sandboxInitError()}. ` +
+					(airgapMode
+						? "Airgap FAILS CLOSED: bash commands will be blocked until the sandbox initializes."
+						: "Plan mode degrades to the regex guardrail."),
+					airgapMode ? "error" : "warning",
+			);
+		}
+		updateStatus(ctx);
+	}
+
+	pi.registerTool({
+		...localBash,
+		label: "bash",
+		async execute(toolCallId, params, signal, onUpdate, _ctx) {
+			if ((planModeEnabled || airgapMode) && isSandboxReady()) {
+				const sandboxedBash = createBashTool(localCwd, { operations: createSandboxedBashOps() });
+				return sandboxedBash.execute(toolCallId, params, signal, onUpdate);
+			}
+			return localBash.execute(toolCallId, params, signal, onUpdate);
+		},
+	});
 
 	// ── plan_step_done tool ──────────────────────────────────────────────
 	// Registers a structured tool the model can call to mark a plan step as
@@ -128,6 +247,15 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		],
 		parameters: Type.Object({
 			step: Type.Integer({ description: "The step number to mark as completed (1-based, matching the plan numbering)", minimum: 1 }),
+			// Phase 3 (c_299c49b1de/c_3b4b5c126f — evidence in status reports): the
+			// model states what it ran to verify the step. Included verbatim in the
+			// result text; harness-run checks override it as ground truth.
+			evidence: Type.Optional(
+				Type.String({
+					description:
+					"One line: how you verified this step (what you ran/checked). Required for steps without an automatic Verify check.",
+				}),
+			),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -151,6 +279,61 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 				};
 			}
 
+			// ── Phase 3: verified completion ──────────────────────────────
+			// plan_step_done is a PROPOSAL. If the step carries a [Verify: <command>]
+			// check and verifySteps is on, the HARNESS runs it (node:child_process,
+			// outside the model's bash tool) and the step only completes on exit 0.
+			// Failed checks feed output back to the model (TaskCompleted exit-2
+			// semantics) and count toward the per-step continuation cap.
+			const verifiedCount = () => todoItems.filter((t) => t.completed && t.check?.verified).length;
+			if (verifyStepsOn && item.check && !item.completed) {
+				if ((item.check.failStreak ?? 0) >= CHECK_FAIL_CAP) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Step ${params.step} is PAUSED: its check has failed ${CHECK_FAIL_CAP} consecutive times. Stop retrying and ask the user how to proceed (questionnaire tool) — do not call plan_step_done for this step again until the user answers.`,
+							},
+						],
+						isError: true,
+						details: { step: params.step, completed: todoItems.filter((t) => t.completed).length, total: todoItems.length, next: null, verifiedCount: verifiedCount() } as PlanStepDoneDetails,
+					};
+				}
+				const checkCwd = ctx?.cwd ?? process.cwd();
+				const result = await runCheck(item.check.command, checkCwd);
+				if (result.exitCode !== 0) {
+					item.check.failStreak = (item.check.failStreak ?? 0) + 1;
+					const atCap = item.check.failStreak >= CHECK_FAIL_CAP;
+					persistState(); // failStreak is durable across resume
+					updateStatus(ctx);
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Step ${params.step} NOT completed — the harness-run check FAILED (attempt ${item.check.failStreak}/${CHECK_FAIL_CAP}).\n` +
+									`Check: ${item.check.command}\n` +
+									`Output:\n${result.output || "(no output)"}\n\n` +
+									(atCap
+										? `This check has now failed ${CHECK_FAIL_CAP} consecutive times. STOP working on this step autonomously and ask the user how to proceed.`
+										: `The step is NOT done. Fix the issue, then call plan_step_done again.`),
+							},
+						],
+						isError: true,
+						details: {
+							step: params.step,
+							completed: todoItems.filter((t) => t.completed).length,
+							total: todoItems.length,
+							next: null,
+							verifiedCount: verifiedCount(),
+							checkFailed: true,
+						} as PlanStepDoneDetails,
+					};
+				}
+				item.check.verified = true;
+				item.check.failStreak = 0;
+			}
+
 			const wasAlreadyDone = item.completed;
 			item.completed = true;
 
@@ -172,14 +355,30 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 				completed,
 				total: todoItems.length,
 				next: next ? next.step : null,
+				verifiedCount: verifiedCount(),
 			};
 
+			// Phase 3 (c_a7b6d9062d / c_299c49b1de): evidence line in the result —
+			// harness evidence (the check run) for verified steps; model-reported
+			// evidence, explicitly labeled, for steps without checks.
+			const evidenceLine = item.check?.verified
+				? `Verified by harness check: ${item.check.command}`
+				: params.evidence
+					? `Reported evidence (no automatic check): ${params.evidence}`
+					: `No evidence provided and no check registered — completion is model-reported only.`;
+
 			if (allDone) {
+				// Phase 3 blind-spot audit (c_cace25de50 / c_0b0b5f27b6): one short
+				// self-audit before the plan closes. Non-blocking; the model answers
+				// in its reply.
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. All ${todoItems.length} steps completed! Plan is finished.`,
+							text:
+								`Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. All ${todoItems.length} steps completed! Plan is finished.\n` +
+								`Evidence: ${evidenceLine}\n\n` +
+								`Before closing, answer briefly: (1) which completed step are you least confident in, and why? (2) one assumption that, if wrong, would change the result? (3) one thing the user should verify themselves?`,
 						},
 					],
 					details: progressDetails,
@@ -190,12 +389,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 				content: [
 					{
 						type: "text",
-						text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. Progress: ${completed}/${todoItems.length}. Next: Step ${next!.step}: ${nextText}`,
+						text: `Step ${params.step} ${wasAlreadyDone ? "was already done" : "marked complete"}. Progress: ${completed}/${todoItems.length}. Next: Step ${next!.step}: ${nextText}\nEvidence: ${evidenceLine}`,
 					},
 				],
 				details: progressDetails,
 			};
 		},
+
 
 		renderCall(args, theme) {
 			return new Text(
@@ -223,15 +423,23 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		default: false,
 	});
 
+	pi.registerFlag("no-plan-sandbox", {
+		description: "Disable the plan-mode kernel sandbox (rollback kill switch; regex guardrail remains)",
+		type: "boolean",
+		default: false,
+	});
+
 	function updateStatus(ctx: ExtensionContext): void {
 		// Footer status
 		if (executionMode && todoItems.length > 0) {
 			const completed = todoItems.filter((t) => t.completed).length;
-			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", `📋 ${completed}/${todoItems.length}`));
+			const verified = todoItems.filter((t) => t.completed && t.check?.verified).length;
+			const suffix = verified > 0 ? ` (${verified}✓)` : "";
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", `📋 ${completed}/${todoItems.length}${suffix}`));
 		} else if (airgapMode) {
-			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", "🔒 airgap"));
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("accent", isSandboxReady() ? "🔒 airgap" : "🔒 airgap ⚠︎ no-sandbox"));
 		} else if (planModeEnabled) {
-			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", "⏸ plan"));
+			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", isSandboxReady() ? "⏸ plan 🔒" : "⏸ plan"));
 		} else {
 			ctx.ui.setStatus("plan-mode", undefined);
 		}
@@ -240,8 +448,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		if (executionMode && todoItems.length > 0) {
 			const lines = todoItems.map((item) => {
 				if (item.completed) {
+					// Phase 3: ✓ = verified by harness check; ☑ = model-reported only.
+					const mark = item.check?.verified ? "✓✓ " : "☑ ";
 					return (
-						ctx.ui.theme.fg("success", "☑ ") + ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
+						ctx.ui.theme.fg("success", mark) + ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
 					);
 				}
 				return `${ctx.ui.theme.fg("muted", "☐ ")}${item.text}`;
@@ -252,7 +462,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		}
 	}
 
-	function togglePlanMode(ctx: ExtensionContext): void {
+	async function togglePlanMode(ctx: ExtensionContext): Promise<void> {
 		// If airgap is on, /plan downgrades to plain plan mode (not exit to normal).
 		// D2: modes are mutually exclusive — this is the "last wins" downgrade path.
 		if (airgapMode) {
@@ -265,6 +475,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			// Switch to the broader plan-mode tool set (preserves injected tools).
 			pi.setActiveTools(getPlanModeTools(normalModeTools ?? withoutPlanStepDone(pi.getActiveTools())));
 			ctx.ui.notify("Switched from airgap to plan mode. Memory tools restored; bash still read-only.");
+			// Phase 2: policy switch — reinitialize the sandbox for the plan-mode
+		// policy (airgap denyRead list no longer applies).
+			await activateSandboxForMode(ctx);
 			updateStatus(ctx);
 			persistState(); // persist airgap:false so resume doesn't restore airgap
 			return;
@@ -282,18 +495,22 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			// we're leaving execution mode (if we were in it).
 			normalModeTools = withoutPlanStepDone(pi.getActiveTools());
 			pi.setActiveTools(getPlanModeTools(normalModeTools));
+			// Phase 2: activate the kernel sandbox for plan mode.
+			await activateSandboxForMode(ctx);
 			ctx.ui.notify("Plan mode enabled. Built-in edit/write disabled; other tools (incl. memory) preserved.");
 		} else {
 			const restore = withoutPlanStepDone(normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"]);
 			pi.setActiveTools(restore);
 			normalModeTools = null;
+			// Phase 2: leaving plan mode — tear the sandbox down (bash unsandboxed again).
+			await teardownSandbox();
 			ctx.ui.notify("Plan mode disabled. Full access restored.");
 		}
 		updateStatus(ctx);
 		persistState(); // persist mode state so resume restores correctly
 	}
 
-	function toggleAirgapMode(ctx: ExtensionContext): void {
+	async function toggleAirgapMode(ctx: ExtensionContext): Promise<void> {
 		const turningOn = !airgapMode;
 		// Always reset execution state when (re)entering a planning mode.
 		executionMode = false;
@@ -311,13 +528,18 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			airgapMode = true;
 			planModeEnabled = true; // airgap ⊂ plan
 			pi.setActiveTools(getAirgapModeTools());
-			ctx.ui.notify("Airgap plan mode ON. No network, no memory/injected tools; bash limited to cat/grep/ls/find/head/tail/wc/pwd.");
+			// Phase 2: activate the kernel sandbox with the FIXED airgap policy
+			// (deny writes + network + AIRGAP_DENY_READ). Fail-closed if it can't.
+			await activateSandboxForMode(ctx);
+			ctx.ui.notify("Airgap plan mode ON. No network, no memory/injected tools; bash limited to cat/grep/ls/find/head/tail/wc/pwd + kernel sandbox.");
 		} else {
 			airgapMode = false;
 			planModeEnabled = false;
 			const restore = withoutPlanStepDone(normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"]);
 			pi.setActiveTools(restore);
 			normalModeTools = null;
+			// Phase 2: leaving airgap to normal mode — tear the sandbox down.
+			await teardownSandbox();
 			ctx.ui.notify("Airgap plan mode OFF. Full access restored.");
 		}
 		updateStatus(ctx);
@@ -403,6 +625,20 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
 		if (!planModeEnabled || event.toolName !== "bash") return;
 
+		// Phase 2: airgap FAILS CLOSED. Without the kernel sandbox there is no
+		// boundary at all (the regex layer is UX, not a boundary — see AUDIT.md),
+		// so refuse bash entirely rather than degrade. --no-plan-sandbox is the
+		// operator's explicit override; honor it (warning already shown at activation).
+		if (airgapMode && !isSandboxReady() && pi.getFlag("no-plan-sandbox") !== true) {
+			const why = `kernel sandbox unavailable (${sandboxInitError() ?? "not initialized"}) — airgap fails closed`;
+			ctx.ui.notify(`⏸ Airgap blocked (${why})`, "error");
+			return {
+				block: true,
+				reason: `Airgap mode: ${why}. Fix the sandbox or exit airgap with /plan-airgap.`,
+				terminate: true,
+			};
+		}
+
 		const command = event.input.command as string;
 		const why = airgapMode ? airgapBlockReason(command) : blockReason(command);
 		if (why) {
@@ -413,9 +649,48 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			return {
 				block: true,
 				reason: `Plan mode: ${why}. Use /plan to disable plan mode first.\nCommand: ${command}`,
+				// Phase 1: when this call is the only tool call in an all-terminating
+				// batch, stop without another model call — the model just retried the
+				// same blocked command; don't let it burn a round-trip on a re-ask.
+				terminate: true,
 			};
 		}
 		lastBlockedCommand = null;
+	});
+
+	// Phase 2: user-typed !/!! commands get the same kernel boundary in
+	// plan/airgap modes. pi 1.4.0 user_bash is FAIL-CLOSED: an invalid defined
+	// result aborts the user's command — so when we are not handling it we must
+	// return undefined (continue propagation), never a partial object.
+	pi.on("user_bash", () => {
+		if (!planModeEnabled || !isSandboxReady()) return undefined;
+		return { operations: createSandboxedBashOps() };
+	});
+
+	// Phase 2: tear the sandbox down on shutdown (kills the network proxy etc.).
+	pi.on("session_shutdown", async () => {
+		await teardownSandbox();
+	});
+
+	// ── Phase 4: trigger assist (manual-first) ──────────────────────────
+	// A single non-blocking "consider /plan?" nudge per session when a user
+	// prompt looks like multi-file/structural work. NEVER auto-enters plan
+	// mode — the evidence against auto-routers is decisive (81% miss rate),
+	// so this only notifies, with a hard abstain class in shouldSuggestPlan.
+	let planNudgeFired = false;
+	pi.on("input", (event, ctx) => {
+		if (planNudgeFired) return undefined;
+		if (event.source !== "interactive") return undefined;
+		if (planModeEnabled || airgapMode || executionMode) return undefined;
+		const text = event.text.trim();
+		if (text.startsWith("/")) return undefined; // slash commands
+		if (!shouldSuggestPlan(text)) return undefined;
+		planNudgeFired = true; // once per session, even if the user ignores it
+		ctx.ui.notify(
+			"This looks like multi-file work — consider planning it first with /plan (read-only exploration, then verified steps).",
+			"info",
+		);
+		return undefined;
 	});
 
 	// Filter out stale plan-mode messages from context.
@@ -477,11 +752,21 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	});
 
 	// Inject plan/execution context before agent starts
-	pi.on("before_agent_start", async () => {
+	// Phase 1 (merged from upstream 1.4.0 example — the a447ba1-class fix): guard on
+	// messageType. On pi 1.4.0, before_agent_start ALSO fires for runs started by
+	// pi.sendMessage({ triggerTurn: true }) while idle (e.g. our plan-mode-resume
+	// messages after compaction). Those are messageType "custom" runs that already
+	// inline their own execution context — without the guard the handler would
+	// double-inject plan-execution-context on those turns. Verified against 1.4.0
+	// agent-session.js (_prepareRun fires only for fresh runs, never continue()).
+	pi.on("before_agent_start", async (event) => {
+		if (event.messageType !== "user") return;
 		if (airgapMode) {
 			return {
 				message: {
 					customType: "plan-mode-context",
+					// Phase 1b: same phased shape as plan mode (clarify → explore →
+					// plan → self-review), compressed for airgap. See AUDIT.md.
 					content: `[AIRGAP PLAN MODE ACTIVE]
 Read-only exploration with a no-exfiltration posture.
 
@@ -492,7 +777,13 @@ Restrictions:
 - bash limited to: cat, grep, ls, find, head, tail, wc, pwd (local read-only)
 - Use the questionnaire tool for clarifying questions
 
-Produce a numbered plan under a "Plan:" header. Do NOT attempt changes.`,
+Work in phases:
+1. Clarify: interview me via questionnaire on anything that would change the plan - highest-leverage questions first, 5-10 max.
+2. Explore: read the relevant code locally; note files touched and what will fight the plan.
+3. Plan: numbered steps under a "Plan:" header - each step: N. <action> - done when: <condition> (files: <paths>) - plus a short "Risks:" section.
+4. Self-review against my goals; flag your least-confident step.
+
+Produce the plan only after clarifying and exploring. Do NOT attempt changes.`,
 					display: false,
 				},
 			};
@@ -502,6 +793,12 @@ Produce a numbered plan under a "Plan:" header. Do NOT attempt changes.`,
 			return {
 				message: {
 					customType: "plan-mode-context",
+					// Phase 1b (neuron-library patterns — see AUDIT.md): work in phases,
+					// clarify-first (Plan/Spec Mode c_51a5dafaf3, Grill Me c_f69a877928,
+					// Blind Spot Pass c_bd8fbd0f12), richer plan format with files/risks
+					// (Ultraplan c_b31f018629), self-review before presenting
+					// (c_51a5dafaf3, c_bf25974278), per-step done-when/Verify format
+					// (Define-Done c_a7b6d9062d — parsing lands in Phase 3).
 					content: `[PLAN MODE ACTIVE]
 You are in plan mode - a read-only exploration mode for safe code analysis.
 
@@ -511,14 +808,13 @@ Restrictions:
 - Bash is restricted to an allowlist of read-only, local shell commands (no network via the shell)
 - Other active tools keep their normal capabilities (memory tools may read/write their own store)
 
-Ask clarifying questions using the questionnaire tool.
+Work in phases - do not jump straight to a plan:
+1. Clarify: use the questionnaire tool to interview me about anything that would change the plan (requirements, edge cases, failure modes, decisions that depend on each other). Ask the highest-leverage questions first; stop at 5-10 questions or when nothing material is left open.
+2. Explore: read the relevant code before proposing anything. Note which files each part of the work touches, and what in the existing code will fight the plan (coupling, hidden invariants, conflicting patterns).
+3. Plan: write a numbered plan under a "Plan:" header. Each step: N. <action> - done when: <observable condition> [Verify: <command>] (files: <paths touched>). If the task is architectural, first list 2-3 plausible approaches with tradeoffs and name your recommendation. End with a short "Risks:" section (what could go wrong, and what will fight this plan).
+4. Self-review: before presenting, re-check the plan against my stated goals, fix any mismatch, and flag the step you are least confident about - say why.
 
-Create a detailed numbered plan under a "Plan:" header:
-
-Plan:
-1. First step description
-2. Second step description
-...
+Self-routing: when later asked to do multi-file or architecturally ambiguous work outside plan mode, recommend starting a plan with /plan first.
 
 Do NOT attempt to make changes - just describe what you would do.`,
 					display: false,
@@ -549,7 +845,7 @@ Continue with step ${nextStep?.step ?? "?"}: ${nextText}
 Remaining steps:
 ${todoList}
 
-After completing a step, call the plan_step_done tool with the step number. Do not wait — call it as soon as the step is done. (You can also write [DONE:n] in your response as a fallback.)`,
+After completing a step, call the plan_step_done tool with the step number. Do not wait — call it as soon as the step is done. (You can also write [DONE:n] in your response as a fallback.) Steps with [Verify: ...] checks complete only when the harness check passes; failed checks return the output — fix and retry (max 8 attempts, then ask the user). Pass a one-line "evidence" argument describing how you verified.`,
 					display: false,
 				},
 			};
@@ -658,6 +954,42 @@ After completing a step, call the plan_step_done tool with the step number. Do n
 			}
 			planModeEnabled = false;
 			executionMode = true;
+			// Phase 2: execution runs with full access — tear the kernel sandbox down.
+			await teardownSandbox();
+
+			// ── Phase 3: check-locking + red-witness at approval ────────
+			// Check definitions were hashed at extraction; running each once HERE,
+			// pre-work, records the red state (TDD red witness — a test check that
+			// already passes pre-work can only prove stasis, so it is noted).
+			// The commands run with full user privileges, same as all executed
+			// work; the user reviewed them in the plan text before approving.
+			const planConfig = loadPlanModeConfig(ctx.cwd);
+			verifyStepsOn = planConfig.verifySteps;
+			if (verifyStepsOn && planConfig.defaultCheck) {
+				for (const it of todoItems) {
+					if (!it.check) {
+						it.check = { command: planConfig.defaultCheck, hash: checkHash(it.step, planConfig.defaultCheck) };
+					}
+				}
+			}
+			if (verifyStepsOn) {
+				const checkedItems = todoItems.filter((t) => t.check);
+				let redCount = 0;
+				for (const it of checkedItems) {
+					const res = await runCheck(it.check!.command, ctx.cwd, 60);
+					it.check!.redWitnessed = res.exitCode !== 0;
+					if (it.check!.redWitnessed) redCount++;
+				}
+				if (checkedItems.length > 0 && ctx.hasUI) {
+					ctx.ui.notify(
+						`Checks locked: ${checkedItems.length} harness check(s). ` +
+						`Red-witness: ${redCount} failing pre-work` +
+						(checkedItems.length - redCount > 0 ? `, ${checkedItems.length - redCount} already green (verification still required at completion)` : ""),
+					"info",
+				);
+				}
+			}
+
 			const restore = normalModeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
 			// RC1 fix: include the plan_step_done tool so the model can mark steps
 			// complete via a structured tool call instead of [DONE:N] text markers.
@@ -678,7 +1010,7 @@ Remaining steps:
 ${remaining}
 
 Start with step ${todoItems[0].step}: ${todoItems[0].rawText ?? todoItems[0].text}
-After completing a step, call the plan_step_done tool with the step number to mark it complete. Do not wait — call it as soon as the step is done.
+After completing a step, call the plan_step_done tool with the step number to mark it complete. Do not wait — call it as soon as the step is done. Steps carrying a [Verify: ...] check are only marked complete when the harness check passes — if it fails you will get the output; fix the issue and call again (after 8 consecutive failures, ask the user). Include a one-line "evidence" argument describing how you verified the step.
 
 Tip: For git commits with special characters in the message, use git commit -F <file> instead of -m to avoid shell interpretation errors.`;
 			pi.sendMessage(
@@ -686,13 +1018,34 @@ Tip: For git commits with special characters in the message, use git commit -F <
 				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		} else if (choice === "Refine the plan") {
-			const refinement = await ctx.ui.editor("Refine the plan:", "");
-			// Guard: state may have changed while the editor dialog was open.
+			// Phase 4 stretch (approved by owner 2026-10-22): Grill-Me interview option
+			// (neuron-library c_f69a877928, "Let Claude Grill You Before It Codes").
+			// Instead of only a free-form editor box, the model can interview the
+			// user first — walking each branch of the design tree until both share
+			// the same mental model — then rewrite the plan. Bounded to 10-15
+			// questions for session practicality (the raw skill says 40-100; that
+			// is for fresh greenfield interviews, not plan refinement).
+			const refineMode = await ctx.ui.select("Refine the plan — how?", [
+				"Interview me first (questions until we're aligned)",
+				"I'll write the refinement",
+			]);
+			// Guard: state may have changed while the dialog was open.
 			if (!planModeEnabled) return;
-			if (refinement?.trim()) {
+			if (refineMode === "Interview me first (questions until we're aligned)") {
+				const grillPrompt =
+					"Refine the plan by interviewing me first. Walk down each branch of the design tree, resolving dependencies between decisions one by one — ask about requirements, edge cases, failure modes, and anything that would change the plan. Use the questionnaire tool. Ask the highest-leverage questions first, at most 10-15, and stop when we are aligned. " +
+					'Then write the updated numbered plan under a "Plan:" header (same format: N. <action> - done when: <condition> [Verify: <command>] (files: <paths>), plus a "Risks:" section). Do not rewrite the plan until we are aligned.';
 				// agent_end still counts as streaming, so deliverAs is required to queue
-				// the refinement as a follow-up turn instead of throwing.
-				pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
+				// the interview instruction as a follow-up turn instead of throwing.
+				pi.sendUserMessage(grillPrompt, { deliverAs: "followUp" });
+			} else {
+				const refinement = await ctx.ui.editor("Refine the plan:", "");
+				if (!planModeEnabled) return;
+				if (refinement?.trim()) {
+					// agent_end still counts as streaming, so deliverAs is required to queue
+					// the refinement as a follow-up turn instead of throwing.
+					pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
+				}
 			}
 		}
 	});
@@ -848,6 +1201,25 @@ After completing a step, call the plan_step_done tool with the step number.`;
 			if (!current.includes(PLAN_STEP_DONE_TOOL)) {
 				pi.setActiveTools(withPlanStepDone(current));
 			}
+			// Phase 3: re-cache the verifySteps config for the resumed run, and
+			// verify every persisted check's hash against its command. A mismatch
+			// means the stored check was tampered with or corrupted — disable the
+			// check loudly rather than silently trusting it (check-locking).
+			verifyStepsOn = loadPlanModeConfig(ctx.cwd).verifySteps;
+			for (const it of todoItems) {
+				if (it.check && it.check.hash !== checkHash(it.step, it.check.command)) {
+					ctx.ui.notify(
+						`Check drift on step ${it.step}: stored hash does not match the check command — check disabled, completion for this step is model-reported only.`,
+						"warning",
+					);
+					it.check = undefined;
+				}
+			}
+		}
+		// Phase 2: if a planning mode was restored (--plan / --plan-airgap flags or
+		// persisted session state), activate the kernel sandbox for it.
+		if (airgapMode || planModeEnabled) {
+			await activateSandboxForMode(ctx);
 		}
 		updateStatus(ctx);
 	});

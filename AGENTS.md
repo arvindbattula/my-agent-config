@@ -38,8 +38,8 @@ The engineering workflow (`/idea-refine` → `/scaffold` → `/discover` → `/b
 
 ## Branch Protection
 
-- `main` is protected by a GitHub ruleset — collaborators must open a PR with owner approval
-- Admin (repo owner) can bypass and push directly
+- `main` is protected by a GitHub ruleset — all changes require a PR, including the owner
+- No bypass: the repo-admin bypass actor was removed (2026-10-22); direct pushes are rejected server-side
 - `.github/workflows/protect-main.yml` — flags direct pushes by creating an issue
 - `.github/workflows/close-external-prs.yml` — auto-closes PRs from non-collaborators
 

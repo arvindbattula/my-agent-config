@@ -466,6 +466,302 @@ files. All fixes are in `index.ts`.
    `wasAlreadyDone` before calling `persistState()`, avoiding double-persist
    when the model re-marks an already-completed step.
 
+## Phase 0 hardening re-baseline (2026-10-22, pi 1.4.0)
+
+### Runtime re-baseline — CRITICAL correction
+**The pi that actually runs is the managed install at `~/.pi/agent/install/releases/1.4.0/`** (launched by `~/.pi/agent/bin/pi`), NOT the npm-global 0.84.2 at `~/.feynman/npm-global/` and not the Feynman-bundled 0.84.2 — both are stale secondary installs. The hardening brief (outputs/plan-mode-hardening/index.md) described 0.84.2 as "installed"; that was wrong about which install executes. All future API verification must target `~/.pi/agent/install/current-version`. Plan: `outputs/.plans/plan-mode-hardening.md`.
+
+### Red-team regression harness (new: `tests/`)
+`tests/corpus.ts` (92 entries × per-mode tiers = 119 tier-runs) + `tests/run.mjs`. Imports `blockReason`/`airgapBlockReason` directly from `../utils.ts` — the old `pats.mjs` copy in outputs/.tmp is retired as a source of truth.
+- `node tests/run.mjs` — gate vs post-Phase-1 targets (33 holes, 7 FPs today — expected until Phase 1)
+- `node tests/run.mjs --snapshot` / `--verify-baseline` — pre-change snapshot + drift detection
+- **Baseline reproduced the red-team result exactly: 22/28 plan-tier allows** (RT-* subset), discharging the re-run requirement on pi 1.4.0 + live extension code.
+- **Newly discovered false positive (GT-15):** `awk 'length > 80 {print}' file` is blocked today because the `>` in the numeric comparison trips the redirect deny `/(^|[^<])>(?!>)/`. Phase 1's quote-awareness must cover redirect detection, not just segmentation. Recorded in the corpus with target=allow.
+- The `tests/` dir has no `package.json` and no `index.ts`, so the extension loader (one level, manifest-driven) ignores it — verified against loader.js discovery rules.
+
+### Changelog audit 0.84.2 → 1.4.0 (extension-API affecting)
+Beyond the three known items (`before_agent_start` messageType union; `user_bash` fail-closed #9068; dynamic `registerTool` refresh — all already in the plan), notable:
+- **1.4.0 #11062:** resumed sessions/`/tree` now activate extension tools the branch never explicitly added unless `defaultActive:false`. Our `plan_step_done` is always registered + activated via `setActiveTools`; `session_start` re-applies tool sets on resume, so behavior is preserved — but re-test `/todos` resume and branch navigation after Phase 1.
+- **1.0.0:** warning when an extension replaces a built-in tool; built-in tools are `builtin:*` extensions. Phase 2's bash override may surface this warning — the upstream sandbox example does the same thing, so treat the warning as expected noise, verify it's not an error at Phase 2.
+- **0.87.0 #9789:** `context` handlers no longer see system messages; pi restores prompt/tool declarations after they run. Our `context` handler only filters custom types + plan-mode user banners — safe, no change needed.
+- **1.1.0 #10739:** the session counts as busy during run start (incl. `before_agent_start` handlers); `sendMessage` queues into the starting run; `sendUserMessage` requires `deliverAs`. Our flows already pass `deliverAs:"followUp"` everywhere they send during handlers — no change.
+
+### Stale-trace re-verification (AUDIT 0.79.10 traces vs 1.4.0 `agent-session.js`)
+- **"`agent_end` fires while still streaming; followUp queues via `agent.continue()`"** — STILL HOLDS on 1.4.0 (`sendMessage` with `triggerTurn:true, deliverAs:"followUp"` while `isStreaming` → `agent.followUp()` → drained by `_handlePostAgentRun` → `agent.continue()`; `before_agent_start` is emitted only in `_prepareRun`, never on `continue()` iterations). The RC4 inlined execute context remains the sole context source on that path.
+- **"`before_agent_start` never re-fires on the retry"** — still true for in-run retries, but **new on 1.4.0:** when idle, `sendMessage({triggerTurn:true})` starts a fresh run via `_startRun({messageType:"custom"})` → `_prepareRun` → `emitBeforeAgentStart(messageType:"custom")`. Our `plan-mode-resume` (threshold/manual compaction) and any idle-time triggerTurn send will therefore re-fire `before_agent_start`. Without a `messageType` guard our execution-mode branch would double-inject on those runs. **Confirmed necessary: the upstream 1.4.0 example guard `if (event.messageType !== "user") return;` is adopted in Phase 1** (merge-from-upstream, not a divergence revert).
+
+Phase 0 complete per `outputs/.plans/plan-mode-hardening.md`. No production code was modified; `utils.ts`/`index.ts` are untouched as of this entry.
+
+## Phase 1 — segment-aware regex hardening + upstream messageType guard (2026-10-22)
+
+Implements Phase 1 of `outputs/.plans/plan-mode-hardening.md`. All changes gated by
+`tests/run.mjs` (117/117 tier-runs at target after the change; drift vs. the pre-change
+baseline = exactly the 33 intended hole-closures + 6 false-positive fixes, zero collateral).
+`tsc --noEmit --strict` clean against the pi 1.4.0 `dist` type definitions.
+
+### `utils.ts` — architecture change (supersedes the old flat pattern lists)
+
+The old layer was a prefix-anchored allowlist + raw-substring denylist over the whole
+command string; it could not model shell composition (`cat x | sh` executed). New layer:
+
+1. **`splitSegments()` (exported):** quote-aware split on unquoted `|`, `||`, `;`, `&&`,
+   `&`, newlines. Quote chars are preserved in segment text (sed/awk guards need them).
+   **Unbalanced quotes → `parseOk:false` → block** (conservative, e.g. `echo 'unbalanced | sh`).
+2. **Every segment must pass:** optional version exception (`node --version`, `python3? --version` — exact
+   match only) → no `HEAD_DENY` token as the segment's FIRST WORD (network: curl/wget/nc/ssh/scp/
+   socat/telnet/dig/nslookup/host/ftp/sftp/ssh*; interpreters: sh/bash/zsh/dash/ksh/python\d*/node/
+   perl/ruby/osascript/deno/php/lua/tclsh) → an allowlisted head → no per-command `FLAG_GUARDS` hit.
+3. **`FLAG_GUARDS`:** sed `e/w/r` commands + s-flags `w/e` (exec/write), awk
+   `getline`/`system(`/`|&`/`/inet/`/`print >`/`print |`, sort `-o|--output`, git
+   `--output|--ext-diff|-c` (config injection → pager/alias second stage).
+4. **`hasUnquotedRedirect()`:** `>`/`>>` blocked only OUTSIDE quotes. Fixes the GT-15 false
+   positive (`awk 'length > 80 {print}'` — the `>` is a comparison inside single quotes).
+   Behavior change: quoted `>` in output text (`echo "a>b"`) is now allowed (correct — it
+   is not a redirect).
+5. **`DESTRUCTIVE_PATTERNS` (whole-command, substring):** all the pre-existing entries kept
+   EXCEPT: network words (→ head-deny, fixing `cat ~/.ssh/id_rsa`), `>`/`>>` (→ quote-aware
+   redirect), `perl`/`ruby` (→ head-deny). Added `<(` (process substitution — `cat <(cmd)` runs
+   a subshell; caught by inspection during design).
+6. **`PLAN_SAFE_HEADS` changes vs old `SAFE_PATTERNS`:** removed `less`/`more` (pagers; no TTY
+   in pi's bash — closes `!cmd`/`-o logfile` class for free); removed `npm view|info|search|
+   outdated|audit` + `yarn list|info|why|audit` (registry egress; hostile `.npmrc` redirect —
+   keeps `npm list|ls` local-only); `env` → exact bare `env` only (kills `LD_PRELOAD`, `PAGER=sh`,
+   `GIT_PAGER=sh` injection); `node/python --version` moved to `VERSION_EXCEPTIONS` (and
+   `python3 --version` added — previously blocked by the old regex).
+7. **`blockReason()`** now reports segment-indexed reasons: `segment 2: interpreter/exec escape
+   not allowed — sh` — the model gets the exact offending part. `airgapBlockReason()` keeps its
+   specific message; generic allowlist misses in airgap get the tiny-core message as before.
+8. `isSafeCommand`/`isAirgapSafeCommand` keep their signatures (now thin wrappers over
+   `commandReason`; the tests import them).
+
+**Known remaining UX friction (deliberate, unchanged from pre-Phase-1):** unquoted `2>/dev/null`
+is still blocked (it contains an unquoted `>`; `2>/tmp/x` writes a file, and allowing only the
+`/dev/null` spelling felt like scope creep for this phase). Revisit if it hurts.
+
+### `index.ts` — two changes
+
+1. **Upstream 1.4.0 guard merged (a447ba1-class fix, from the upstream example L204):**
+   `pi.on("before_agent_start", (event) => { if (event.messageType !== "user") return; … })`.
+   On pi 1.4.0, `before_agent_start` also fires for `pi.sendMessage({triggerTurn:true})`
+   idle-started runs (messageType `"custom"`); our `plan-mode-resume`/execute messages inline
+   their own context, so without the guard those turns would be double-injected. Verified
+   against 1.4.0 `agent-session.js` (see Phase 0 entry). This is a **merge from upstream**, not
+   a divergence revert — all other AUDIT divergences stand.
+2. **`terminate: true`** on blocked bash `tool_call` results: an all-terminating batch whose every
+   blocked call sets this skips the automatic follow-up model call (pi ≥0.84.1 feature) — the
+   model stops churning retries against the wall.
+
+### Rollback
+`tests/pre-phase1/{utils,index}.ts.pre-phase1` hold the pre-Phase-1 files; `cp` back and re-run
+`node tests/run.mjs --verify-baseline` (expect the inverse drift). Corpus gate before this
+change: 33 holes / 7 FPs; after: 0/0.
+
+### Phase 1 process note (caught during Phase 1b verification)
+The Phase 1 edit batch that added the `messageType` guard + `terminate: true` failed
+**atomically** (the tool rejected the second hunk, and the first was not applied either);
+the retry only restored `terminate: true`. The guard was silently missing until Phase 1b's
+diff-against-backup verification caught it (expected 6 hunks, found 5). Lesson recorded:
+**every phase must diff against its backup and count hunks** — a "replaced successfully"
+once is not proof for multi-edit batches. Guard applied and verified present at index.ts L492.
+
+## Phase 1b — prompt-instruction upgrade, neuron-library-informed (2026-10-22)
+
+Prompt strings only; zero logic changes (diff vs. pre-Phase-1 backup: 6 hunks, all in the
+two `before_agent_start` prompt blocks + the Phase 1 guard/terminate already logged).
+Implements Phase 1b of the plan; patterns sourced from the owner's neuron-library cards
+(via the neuron-library MCP; full mapping in the plan file's Appendix):
+
+1. **Clarify-first as an explicit phase** (Plan/Spec Mode c_51a5dafaf3, Grill Me c_f69a877928,
+   Blind Spot Pass c_bd8fbd0f12): the plan-mode prompt now instructs the model to interview
+   the user via the questionnaire BEFORE planning — highest-leverage questions first, capped
+   at 5–10, "stop when nothing material is left open" (the abstain discipline from Phase 4's
+   evidence base, applied to questioning).
+2. **Richer plan format** (Ultraplan c_b31f018629): steps must name touched files; architectural
+   tasks require 2–3 approaches with tradeoffs + a recommendation; a short "Risks:" section
+   including "what will fight this plan."
+3. **Self-review before presenting** (c_51a5dafaf3 phase 3, c_bf25974278, c_bb2edfd0af):
+   re-check against stated goals, flag the least-confident step.
+4. **Per-step done-when/Verify format** (Define-Done c_a7b6d9062d, Goal-not-prompt c_1c53dadf98):
+   `N. <action> - done when: <condition> [Verify: <command>] (files: <paths>)`. The suffixes are
+   inert until Phase 3 parses them (`extractTodoItems` verified compatible: rawText keeps the
+   full line; display text truncates as before; Risks section ignored — tested).
+5. **Airgap prompt**: same 4-phase shape, compressed, memory-tool wording unchanged.
+
+Markers `[PLAN MODE ACTIVE]` / `[AIRGAP PLAN MODE ACTIVE]` kept identical (the `context`
+filter strips on those substrings). `tsc --noEmit --strict` clean; corpus gate 117/117
+(prompt layer is regex-invisible by design — the phase gate is a human live-session review).
+
+**Live-session test for the owner (the Phase 1b gate):** start a fresh pi session, run `/plan`,
+and give it a multi-file task (e.g. "add a retry wrapper around the fetch calls in this repo").
+Check: (a) it asks clarifying questions FIRST via questionnaire, (b) steps name files,
+(c) a Risks section appears, (d) it flags its least-confident step. Rollback: revert the two
+prompt blocks (diff hunks above).
+
+## Phase 2 — kernel enforcement via @anthropic-ai/sandbox-runtime (2026-10-22)
+
+Implements Phase 2 of the plan. Plan/airgap bash now runs inside an OS-level sandbox; the
+Phase 1 regex layer stays in front as advisory UX. Verified: sandbox tier 11/11, corpus gate
+117/117, `tsc --noEmit --strict` clean (incl. sandbox.ts), and a LIVE headless session
+(`pi --plan-airgap -p …`) where `cat ~/.ssh/config` was allowed by the regex and denied by the
+kernel ("Operation not permitted") while normal reads worked.
+
+### New files
+- **`package.json`** — `pi.extensions` manifest (loader now loads via manifest, not index.ts
+  auto-discovery; same entry) + `@anthropic-ai/sandbox-runtime` pinned **0.0.81** (latest at install;
+  the brief's ≥0.0.43 floor was for the SOCKS5 null-byte fix — upstream example still pins the
+  vulnerable 0.0.26; do not copy it).
+- **`sandbox.ts`** — policy builders + lifecycle (`ensureSandbox`/`teardownSandbox`/`isSandboxReady`,
+  policy-keyed so plan↔airgap switches reset+reinit) + `createSandboxedBashOps()` copied verbatim
+  from the upstream example (preserves `detached:true` + process-group SIGKILL timeouts — the
+  pattern is byte-identical in the 0.84.2 and 1.4.0 installs).
+
+### Empty-list semantics — the CVE-2025-66479 question, resolved empirically
+The plan required probing deny-all semantics rather than trusting empty lists. On 0.0.81 /
+macOS 15.7.7: `network.allowedDomains: []` + `filesystem.allowWrite: []` IS accepted and
+**enforced** — write probe: "Operation not permitted"; egress probe: curl 000/reset while the
+unsandboxed control gets 200. The credentials schemas reject explicitly-empty lists outright
+("an explicitly empty list is rejected" in the .d.ts) — the empty-list footgun class is now a
+validation error upstream. Also: the managed `TMPDIR=/tmp/claude` scratch dir does NOT exist in
+our posture → effectively full write-deny, including /tmp.
+
+### index.ts integration (17 hunks, all diffed & counted — see Phase 1b process note)
+- `registerTool` override of built-in `bash` (extension tools win — verified 1.4.0 registry):
+  sandboxed ops while (plan|airgap) && sandbox-ready; otherwise untouched passthrough.
+- `pi.on("user_bash")` → sandboxed ops in planning modes, **`undefined` otherwise** (1.4.0
+  fail-closed semantics — any invalid defined result would abort the user's command).
+- `activateSandboxForMode(ctx)` on: plan enter, airgap enter, airgap→plan downgrade (policy
+  switch), session_start mode restore. `teardownSandbox()` on: plan/airgap exit, execute
+  branch, `session_shutdown`.
+- **Airgap fails closed:** if the sandbox is not ready, ALL bash is blocked (with
+  `terminate:true`); `--no-plan-sandbox` is the operator's explicit escape hatch.
+- Plan mode fails OPEN to the regex layer with visible warnings (status shows `⏸ plan` without
+  the 🔒 when unsandboxed; airgap shows `⚠︎ no-sandbox`).
+- `togglePlanMode`/`toggleAirgapMode` became `async` for sandbox init — all call sites were
+  already async handlers.
+- Plan-mode `denyRead` opt-in: `<cwd>/.pi/plan-mode.json` `{ "denyRead": [...] }` (only
+  narrows; never widens; parse failure = no extra restrictions). Airgap `denyRead` is FIXED:
+  `~/.ssh`, `~/.aws`, `~/.gnupg`, `.env`, `.env.*`, `*.pem`, `*.key` (owner decision (b)).
+
+### Tests
+- `node tests/run.mjs --sandbox` — Tier 3: 11 probes incl. the regex-bypass write vectors
+  (`sh -c`, `git diff --output`, `sort -o`) sent DIRECTLY through sandboxed ops, bypassing the
+  regex on purpose; policy-switch reinit; airgap `~/.ssh`/`~/.aws` read denial.
+- One probe bug found & fixed during the phase: `curl -w NETOK` prints the format string even on
+  failure — the network probe now checks `%{http_code}` (000 when denied) with an unsandboxed
+  control (skip-safe offline).
+
+### Rollback
+1. `pi --no-plan-sandbox` — runtime kill switch (regex layer remains).
+2. Full: revert `index.ts` from `tests/pre-phase2/`, delete `sandbox.ts` + `package.json` +
+   `node_modules/`, re-run `node tests/run.mjs` (regex gate must stay 117/117).
+
+## Phase 3 — verified step completion (2026-10-22)
+
+Implements Phase 3. `plan_step_done` is now a PROPOSAL: steps carrying a `[Verify: <command>]`
+check complete only when the HARNESS runs the check and it exits 0. The model cannot run,
+intercept, or author the execution of its own verifier (Claude Code `TaskCompleted` exit-2
+semantics; SpecBench/EvilGenie's reward-hacking lesson). Verified: `tests/phase3.mjs` ALL
+PASS (14 checks), corpus 117/117, sandbox tier 11/11, tsc strict clean; diff vs.
+`tests/pre-phase3/`: 19+5 hunks, all counted and reviewed.
+
+### `utils.ts`
+- `TodoItem` gains `doneWhen`, `files`, and `check { command, hash, redWitnessed?, verified?,
+  failStreak? }`. Backward-compatible: persisted legacy plans simply lack the fields.
+- `extractTodoItems` parses the Phase 1b step format — `N. <action> - done when: <cond>
+  [Verify: <cmd>] (files: <paths>)` — suffixes optional, order-tolerant; display text is now
+  action-only (cleaner widget); rawText keeps the full line (checked in tests).
+- `checkHash(step, command)` — sha256/16 of `step|command`, computed at extraction: stable
+  across re-extraction (tested), the audit/lock trail.
+- `loadPlanModeConfig(cwd)` — `.pi/plan-mode.json` `{ verifySteps (default true), defaultCheck,
+  denyRead }`; invalid JSON/missing file → safe defaults. `sandbox.ts`'s denyRead loader now
+  delegates here (single source of truth).
+
+### `index.ts`
+- `runCheck()` — harness-side check execution via `node:child_process` (NOT the model's bash
+  tool): detached process group, SIGKILL on 120s timeout, output capped at 4KB for tool
+  feedback. Checks run with full user privileges during execution mode — same trust level
+  as all executed work; the user reviews the visible `Verify:` commands in the plan before
+  approving.
+- `plan_step_done.execute`: with `verifyStepsOn && item.check && !item.completed`, runs the
+  check first. Fail → `isError: true` + check output + attempt count; step stays incomplete;
+  `failStreak` persists across resume. Success → `check.verified = true`. **Cap: 8 consecutive
+  failures** pauses the step and instructs the model to ask the user (Loop Engineering's
+  verify→retry→escalate graph — escalation is a designed transition, not a failure).
+- `evidence` parameter (optional string) + evidence line in every result — harness evidence for
+  verified steps, explicitly-labeled model-reported evidence otherwise (c_a7b6d9062d,
+  c_299c49b1de, c_3b4b5c126f).
+- **Blind-spot audit** on plan completion (c_cace25de50, c_0b0b5f27b6): the final result
+  text asks for least-confident step / riskiest assumption / one user verification.
+- **Red-witness at approval** (Execute branch): all checks run once pre-work; failures recorded
+  as `redWitnessed` (TDD red state); already-green checks noted as such. `verifyStepsOn` cached
+  from config at approval.
+- **Check-locking on resume** (`session_start`): each persisted check's hash is re-verified
+  against its command; mismatch → loud warning + check disabled (never silently trusted).
+- UI: `✓✓` verified vs `☑` reported in the widget; footer gains `(n✓)`. Exec message and
+  execution context gained one check-instruction line each.
+
+### Not automated (honest scope note)
+The full `plan_step_done` gating loop can't run headless (the Execute flow needs interactive
+UI). Unit tests cover extraction/hash/config; `runCheck`'s spawn pattern is the same as the
+Phase 2 ops (proven live). Manual live gate for the owner: run `/plan` on a real task, ensure
+one step carries `[Verify: false]`-style always-failing check — e.g. `[Verify: false]` — try
+`plan_step_done` → expect refusal + attempt counter; fix (e.g. edit to `[Verify: true]` in a
+refine pass) → passes → `✓✓` in widget.
+
+### Rollback
+`cp tests/pre-phase3/{index,utils}.ts .` restores pre-Phase-3 state; `"verifySteps": false` in
+`.pi/plan-mode.json` disables gating at runtime instantly (steps become reported-only again,
+exactly pre-Phase-3 semantics); corpus/sandbox/phase3 suites must all re-pass after any revert.
+
+## Phase 4 — trigger assist (2026-10-22)
+
+Final phase. A single non-blocking "consider /plan?" nudge per session. Deliberately
+manual-first: NO auto-router (the one independently measured attempt missed 81% under
+ambiguity; blast-radius cues barely reduce action propensity — routing must stay with the
+human). 4 hunks vs. `tests/pre-phase4/` (import, handler block, prompt line; 1 utils hunk).
+
+- **`utils.ts` `shouldSuggestPlan(text)`** (pure, tested): suggest = keyword hit
+  (refactor/migrat\w+/restructure/redesign/rewrite/rework/architect\w*/overhaul/multi-file/
+  "several files"/"many files"/"across the repo") OR ≥3 DISTINCT file-ish mentions (path or
+  extension tokens, deduped). Abstain = <40 chars, explicit directness markers ("just",
+  "quickly", "quick fix", "one-liner", "straight to", "don't plan", "no plan", "trivial"),
+  or neither trigger. The abstain class is the design (Cursor's keyword approach is the
+  existence proof; the DIY router-hook lesson is "when unsure, don't nag").
+- **`index.ts` `pi.on("input")`**: fires only for `source === "interactive"`, not for slash
+  commands, never while in plan/airgap/execution mode, `planNudgeFired` latches once per
+  session EVEN IF IGNORED (anti-spam), notify only — no mode change, no context edit.
+  Returns `undefined` (input event must not be transformed).
+- **Self-routing line** in the plan-mode context prompt (EnterPlanMode pattern): the model
+  recommends /plan for multi-file work it meets outside plan mode.
+- **Stretch BUILT (owner approval 2026-10-22):** Refine → Grill-Me questionnaire
+  interview (c_f69a877928). "Refine the plan" now asks HOW: "Interview me first
+  (questions until we're aligned)" — the model walks each branch of the design tree via
+  the questionnaire (highest-leverage first, capped at 10-15 questions — the raw skill's
+  40–100 is for greenfield interviews, not refinement), then rewrites the plan in the
+  Phase 1b format; or the original free-form editor. Delivered as a follow-up user message
+  (agent_end still counts as streaming); the agent_end extraction flow re-runs naturally
+  after the updated plan, returning to the Execute/Stay/Refine prompt.
+
+Verified: `tests/phase4.mjs` 12/12 (hit/abstain matrix incl. dedup and directness markers);
+full battery green (corpus 117/117, sandbox 11/11, phase3 ALL PASS, tsc strict clean).
+Manual no-spam check for the owner: in a fresh session, send a refactor-shaped prompt → one
+hint; send another → silence; send "just fix X quickly" → silence throughout.
+
+### Rollback
+Remove the `pi.on("input")` block + the import + the prompt line (`tests/pre-phase4/` has
+the pre-phase files); `shouldSuggestPlan` in utils.ts is inert without the handler.
+
+## Post-phase fix — /dev/null sink carve-out (2026-10-22, owner-approved)
+
+Resolves the "known UX friction" noted in the Phase 1 entry: `hasUnquotedRedirect()` now
+skips redirects whose destination is exactly `/dev/null` (`2>/dev/null`, `2>>/dev/null`,
+`>/dev/null`, `&>/dev/null`) — the null device is a sink, not a file, so these write nowhere.
+A lookahead (`(?![\w./-])`) keeps `2>/dev/null.txt` and continued paths blocked. Still blocked,
+deliberately (outside the approved scope): `2>&1` and every real-file redirect.
+Corpus: SN-01..SN-05 added (allow ×3, block ×2 proving no leak) — gate 127/127.
+Kernel sandbox unchanged (writes are denied at the OS level regardless).
+Rollback: revert the `hasUnquotedRedirect` function; SN-* corpus entries document the split.
+
 ## Feature addition: `--plan-airgap` mode (2026-07-17)
 
 Implements deferred item A. Airgap is a **modifier on plan mode**, not a
