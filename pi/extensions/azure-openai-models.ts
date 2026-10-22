@@ -10,6 +10,7 @@
 //   AZURE_FOUNDRY_OPENAI_MODEL_GROQ_ID       Deployment ID for Groq model (optional)
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { clampThinkingLevel } from "@earendil-works/pi-ai/models";
 import { getAzureToken } from "./lib/azure-token";
 import { fetchWithTransientRetry, readRetryConfig } from "./lib/transient-retry";
 
@@ -35,36 +36,9 @@ function getAccessToken(): string {
 // pi-ai's built-in streamSimple wrapper clamps the requested thinking level to
 // the model's supported set before delegating to stream(). Our extension is called
 // directly by provider-composer.js with the raw SimpleStreamOptions, bypassing that
-// wrapper, so we must clamp ourselves. The logic mirrors pi-ai's getSupportedThinkingLevels
-// and clampThinkingLevel (dist/models.js) exactly — keeping it inline avoids a runtime
-// dependency on @earendil-works/pi-ai which is only resolvable via jiti aliases at
-// pi load time, not from the test environment.
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-function getSupportedThinkingLevels(model: any): string[] {
-  if (!model.reasoning) return ["off"];
-  return THINKING_LEVELS.filter((level) => {
-    const mapped = model.thinkingLevelMap?.[level];
-    if (mapped === null) return false;
-    if (level === "xhigh" || level === "max") return mapped !== undefined;
-    return true;
-  });
-}
-
-function clampThinkingLevel(model: any, level: string): string {
-  const available = getSupportedThinkingLevels(model);
-  if (available.includes(level)) return level;
-  const idx = THINKING_LEVELS.indexOf(level);
-  if (idx === -1) return available[0] ?? "off";
-  // Search forward first (prefer higher effort), then backward.
-  for (let i = idx; i < THINKING_LEVELS.length; i++) {
-    if (available.includes(THINKING_LEVELS[i])) return THINKING_LEVELS[i];
-  }
-  for (let i = idx - 1; i >= 0; i--) {
-    if (available.includes(THINKING_LEVELS[i])) return THINKING_LEVELS[i];
-  }
-  return available[0] ?? "off";
-}
+// wrapper, so we must clamp ourselves via pi-ai's own clampThinkingLevel.
+// (Importable in extensions since pi 1.4.0's loader-alias fix, #11156; the test
+// environment resolves the same specifier via ts-resolve-hook.mjs.)
 
 // ── Model definitions ────────────────────────────────────────────────────────
 
