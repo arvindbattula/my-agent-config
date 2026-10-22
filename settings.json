@@ -1,4 +1,5 @@
 {
+  "agentPushNotifEnabled": true,
   "permissions": {
     "allow": [
       "Bash(node:*)",
