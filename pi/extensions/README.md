@@ -146,6 +146,14 @@ The MODEL_SPECS parity test had been failing to find the catalog at all — unde
 
 Because the test was dead, MODEL_SPECS drift went undetected. Lesson: run `node pi/extensions/*.test.mjs` after every pi update, not only after editing extensions.
 
+### Test pi-location resolution broke under the managed install (repaired 2026-10-21)
+
+The pi 1.4.0 update migrated pi from an npm global install to the managed installer: `pi` is now a launcher script at `~/.pi/agent/bin/pi` that execs `~/.pi/agent/install/releases/<version>/node_modules/.bin/pi` (version named by `~/.pi/agent/install/current-version`). `which pi` therefore resolves to a script that is *not* inside any package, and the walk-up-to-nearest-`package.json` loop reached `/` and spun forever (`dirname("/") === "/")` — `azure-model-specs.test.mjs` and `session-stats.test.mjs` hung instead of failing. Same root cause in `statusline-test-hook.mjs`'s pi-tui resolution.
+
+**Resolved:** new shared helper `pi-pkg-resolve.mjs` (`piPackageDir(pkg)`) — tries the managed layout first (via `current-version`), then the legacy npm walk-up with a root guard; returns the package dir for any `@earendil-works/*` package of the active install. Used by all three resolution sites. All 108 checks + 5 statusline cases pass again.
+
+**Lesson:** the breakage came from the *install layout* changing, not the extension API — reinforces running the test suite after every pi update, including installer migrations.
+
 ### Valar has no retry coverage
 
 `settings.json` sets `"retry": {"enabled": false}` globally — correct for the Azure providers, which retry in-extension via `lib/transient-retry.ts` so failed attempts stay out of the chat UI. But `pi/models.json` also defines a `valar` provider with no in-extension retry, so it gets zero retry on anything. All of pi's recent retry improvements (OpenAI Responses early-stream, DNS failures, summarization retry) are switched off for it.

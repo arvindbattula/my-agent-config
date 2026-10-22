@@ -17,25 +17,24 @@
 
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { execSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { piPackageDir } from "./pi-pkg-resolve.mjs";
 
 // Resolve extensionless relative imports inside the .ts extensions.
 register("./ts-resolve-hook.mjs", import.meta.url);
 
 const { computeSessionTotals, formatTokens, sanitizeStatusText } = await import("./lib/session-stats.ts");
 
-// Locate pi's installed dist (usage-totals.js) by resolving the `pi` binary
-// symlink and walking up to the package root (the binary has moved between
-// dist/cli.js and dist/bundle/cli.js across pi versions, so don't guess).
-const piBin = execSync("which pi", { encoding: "utf-8" }).trim();
-let pkgDir = dirname(realpathSync(piBin));
-while (!existsSync(join(pkgDir, "package.json"))) {
-	pkgDir = dirname(pkgDir);
-}
-const usageTotalsPath = join(pkgDir, "dist", "core", "usage-totals.js");
+// Locate pi's installed dist (usage-totals.js) via the active pi installation
+// (managed installer or npm global — see pi-pkg-resolve.mjs).
+const usageTotalsPath = join(
+	piPackageDir("@earendil-works/pi-coding-agent"),
+	"dist",
+	"core",
+	"usage-totals.js",
+);
 if (!existsSync(usageTotalsPath)) {
 	throw new Error(`Cannot find pi's usage-totals.js at ${usageTotalsPath}`);
 }

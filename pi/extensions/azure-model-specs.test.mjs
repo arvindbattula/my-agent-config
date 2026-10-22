@@ -11,9 +11,9 @@
 
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
-import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { piPackageDir } from "./pi-pkg-resolve.mjs";
 
 // Resolve extensionless relative imports inside the .ts extensions.
 register("./ts-resolve-hook.mjs", import.meta.url);
@@ -30,22 +30,13 @@ globalThis.fetch = async () => { throw new Error("network disabled in test"); };
 
 const { MODEL_SPECS } = await import("./azure-foundry.ts");
 
-// Locate pi-ai's bundled Anthropic catalog by resolving the `pi` binary symlink.
-// The catalog is the authoritative source for model metadata; MODEL_SPECS must
-// stay in sync with it.
+// Locate pi-ai's bundled Anthropic catalog via the active pi installation
+// (managed or npm). The catalog is the authoritative source for model
+// metadata; MODEL_SPECS must stay in sync with it.
 function findCatalog() {
-  const piBin = execSync("which pi", { encoding: "utf-8" }).trim();
-  const cliPath = realpathSync(piBin);
-  // Walk up from the binary to the package root. The pi binary has moved
-  // between dist/cli.js and dist/bundle/cli.js across versions, so a fixed
-  // dirname(dirname(cliPath)) lands one level short.
-  let pkgDir = dirname(cliPath);
-  while (!existsSync(join(pkgDir, "package.json"))) {
-    pkgDir = dirname(pkgDir);
-  }
   const catalogPath = resolve(
-    pkgDir,
-    "node_modules/@earendil-works/pi-ai/dist/providers/data/anthropic.json",
+    piPackageDir("@earendil-works/pi-ai"),
+    "dist/providers/data/anthropic.json",
   );
   if (!existsSync(catalogPath)) {
     throw new Error(`Cannot find anthropic.json catalog at ${catalogPath}`);
