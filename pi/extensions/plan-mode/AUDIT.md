@@ -751,6 +751,17 @@ hint; send another → silence; send "just fix X quickly" → silence throughout
 Remove the `pi.on("input")` block + the import + the prompt line (`tests/pre-phase4/` has
 the pre-phase files); `shouldSuggestPlan` in utils.ts is inert without the handler.
 
+## Post-phase fix — /dev/null sink carve-out (2026-10-22, owner-approved)
+
+Resolves the "known UX friction" noted in the Phase 1 entry: `hasUnquotedRedirect()` now
+skips redirects whose destination is exactly `/dev/null` (`2>/dev/null`, `2>>/dev/null`,
+`>/dev/null`, `&>/dev/null`) — the null device is a sink, not a file, so these write nowhere.
+A lookahead (`(?![\w./-])`) keeps `2>/dev/null.txt` and continued paths blocked. Still blocked,
+deliberately (outside the approved scope): `2>&1` and every real-file redirect.
+Corpus: SN-01..SN-05 added (allow ×3, block ×2 proving no leak) — gate 127/127.
+Kernel sandbox unchanged (writes are denied at the OS level regardless).
+Rollback: revert the `hasUnquotedRedirect` function; SN-* corpus entries document the split.
+
 ## Feature addition: `--plan-airgap` mode (2026-07-17)
 
 Implements deferred item A. Airgap is a **modifier on plan mode**, not a

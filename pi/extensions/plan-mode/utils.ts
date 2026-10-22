@@ -231,15 +231,35 @@ export function splitSegments(command: string): { segments: string[]; parseOk: b
 	return { segments, parseOk: true };
 }
 
-/** True if `>` or `>>` appears OUTSIDE quotes (a real shell redirect). */
+/**
+ * True if `>` or `>>` appears OUTSIDE quotes (a real shell redirect) — with one
+ * approved carve-out (owner, 2026-10-22): redirects whose destination is exactly
+ * `/dev/null` (`2>/dev/null`, `2>>/dev/null`, `>/dev/null`, `&>/dev/null`) write
+ * nowhere — the null device is a sink, not a file — so they are allowed. The
+ * lookahead (`(?![\w./-])`) keeps `2>/dev/null.txt` or a continued path blocked.
+ */
 function hasUnquotedRedirect(command: string): boolean {
 	let inSingle = false;
 	let inDouble = false;
-	for (let i = 0; i < command.length; i++) {
+	let i = 0;
+	while (i < command.length) {
 		const c = command[i];
-		if (c === "'" && !inDouble) inSingle = !inSingle;
-		else if (c === '"' && !inSingle) inDouble = !inDouble;
-		else if (!inSingle && !inDouble && c === ">") return true;
+		if (c === "'" && !inDouble) {
+			inSingle = !inSingle;
+			i++;
+		} else if (c === '"' && !inSingle) {
+			inDouble = !inDouble;
+			i++;
+		} else if (!inSingle && !inDouble && c === ">") {
+			const sink = /^>{1,2}\s*\/dev\/null(?![\w./-])/.exec(command.slice(i));
+			if (sink) {
+				i += sink[0].length; // approved null-sink redirect — skip it
+				continue;
+			}
+			return true;
+		} else {
+			i++;
+		}
 	}
 	return false;
 }

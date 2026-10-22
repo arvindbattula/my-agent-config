@@ -97,7 +97,7 @@ Blocked (segment head or content):
 - Any pipeline segment headed by an interpreter: `sh`, `bash`, `zsh`, `python*`, `node`, `perl`, `ruby`, `osascript`, … (`cat x | sh` is blocked)
 - Network commands: `curl`, `wget`, `nc`, `ssh`, `scp`, `socat`, `telnet`, `dig`, … — blocked as a command, not as a word (`grep ssh README.md` is fine)
 - File modification: `rm`, `mv`, `cp`, `mkdir`, `touch`, `tee`, `truncate`, …
-- Output redirection (`>`, `>>` outside quotes)
+- Output redirection (`>`, `>>` outside quotes) — except redirects to `/dev/null` (`2>/dev/null`, `>/dev/null`, …), which write nowhere and are allowed
 - Command/process substitution: `$(…)`, backticks, `<(…)`
 - Git write: `git add`, `git commit`, `git push`, … and read-git write flags (`--output=`, `-c`)
 - Package install: `npm install`, `yarn add`, `pip install`, and registry queries (`npm view`, `yarn info`, …)

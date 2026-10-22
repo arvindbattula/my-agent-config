@@ -118,6 +118,13 @@ export const CORPUS: CorpusEntry[] = [
 	{ id: "VE-02", command: "python --version", mode: "plan", target: "allow", category: "version-exception", severity: "none", source: "version" },
 	{ id: "VE-03", command: "python3 --version", mode: "plan", target: "allow", category: "version-exception", severity: "none", note: "currently BLOCKED (regex only knows 'python'); must become allowed", source: "version" },
 
+	// ── SN-*: /dev/null sink carve-out (owner-approved 2026-10-22) ─────────
+	{ id: "SN-01", command: "grep -rn \"import\" . 2>/dev/null", mode: "both", target: "allow", category: "null-sink", severity: "none", note: "2>/dev/null writes nowhere — allowed by the approved carve-out (was blocked pre-carve-out: the session's own UX friction)", source: "sink" },
+	{ id: "SN-02", command: "cat x 2>>/dev/null", mode: "both", target: "allow", category: "null-sink", severity: "none", source: "sink" },
+	{ id: "SN-03", command: "cat x >/dev/null", mode: "both", target: "allow", category: "null-sink", severity: "none", note: "stdout-to-sink is the same harmlessness class", source: "sink" },
+	{ id: "SN-04", command: "grep foo file 2> /tmp/err.log", mode: "both", target: "block", category: "write-control", severity: "high", note: "carve-out must NOT leak: a real file destination stays blocked", source: "sink" },
+	{ id: "SN-05", command: "cat x 2>/dev/null.txt", mode: "both", target: "block", category: "write-control", severity: "high", note: "lookahead: /dev/null.txt is a real file, not the sink", source: "sink" },
+
 	// ── Airgap-tier benign core (must stay allowed in BOTH tiers) ──────
 	{ id: "AG-01", command: "pwd", mode: "airgap", target: "allow", category: "benign-control", severity: "none", source: "airgap" },
 	{ id: "AG-02", command: "wc -c file", mode: "airgap", target: "allow", category: "benign-control", severity: "none", source: "airgap" },
