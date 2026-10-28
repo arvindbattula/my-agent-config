@@ -1,0 +1,261 @@
+/**
+ * Pure utility functions for plan mode.
+ * Extracted for testability.
+ */
+
+// Destructive commands blocked in plan mode
+const DESTRUCTIVE_PATTERNS = [
+	/\brm\b/i,
+	/\brmdir\b/i,
+	/\bmv\b/i,
+	/\bcp\b/i,
+	/\bmkdir\b/i,
+	/\btouch\b/i,
+	/\bchmod\b/i,
+	/\bchown\b/i,
+	/\bchgrp\b/i,
+	/\bln\b/i,
+	/\btee\b/i,
+	/\btruncate\b/i,
+	/\bdd\b/i,
+	/\bshred\b/i,
+	/(^|[^<])>(?!>)/,
+	/>>/,
+	/\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
+	/\byarn\s+(add|remove|install|publish)/i,
+	/\bpnpm\s+(add|remove|install|publish)/i,
+	/\bpip\s+(install|uninstall)/i,
+	/\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
+	/\bbrew\s+(install|uninstall|upgrade)/i,
+	/\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
+	/\bsudo\b/i,
+	/\bsu\b/i,
+	/\bkill\b/i,
+	/\bpkill\b/i,
+	/\bkillall\b/i,
+	/\breboot\b/i,
+	/\bshutdown\b/i,
+	/\bsystemctl\s+(start|stop|restart|enable|disable)/i,
+	/\bservice\s+\S+\s+(start|stop|restart)/i,
+	/\b(vim?|nano|emacs|code|subl)\b/i,
+	// --- Local hardening (diverges from upstream example; see AUDIT.md) ---
+	// Block network egress entirely: "read-only" must mean local-read-only.
+	/\bcurl\b/i,
+	/\bwget\b/i,
+	/\bnc\b/i,
+	/\bncat\b/i,
+	/\bnetcat\b/i,
+	/\bssh\b/i,
+	/\bscp\b/i,
+	/\bftp\b/i,
+	// Block interpreter / command-substitution escapes (awk system(), sed e, eval, xargs, etc.)
+	/\bsystem\s*\(/i,
+	/\beval\b/i,
+	/\bexec\b/i,
+	/\bxargs\b/i,
+	/-exec\b/i,
+	/-execdir\b/i,
+	/-delete\b/i,
+	/-ok(dir)?\b/i,
+	/-fprintf?\b/i,
+	/-fprint0\b/i,
+	/-fls\b/i,
+	/\$\(/, // $(...) command substitution
+	/`/, // backtick command substitution
+	// Block bash /dev/tcp and /dev/udp pseudo-files — these allow network
+	// egress via any file-reading command (cat, head, tail, etc.).
+	/\/dev\/tcp\b/i,
+	/\/dev\/udp\b/i,
+	/\bperl\b/i,
+	/\bruby\b/i,
+	/\bbash\s+-c\b/i,
+	/\bsh\s+-c\b/i,
+];
+
+// Safe read-only commands allowed in plan mode
+const SAFE_PATTERNS = [
+	/^\s*cat\b/,
+	/^\s*head\b/,
+	/^\s*tail\b/,
+	/^\s*less\b/,
+	/^\s*more\b/,
+	/^\s*grep\b/,
+	/^\s*find\b/,
+	/^\s*ls\b/,
+	/^\s*pwd\b/,
+	/^\s*echo\b/,
+	/^\s*printf\b/,
+	/^\s*wc\b/,
+	/^\s*sort\b/,
+	/^\s*uniq\b/,
+	/^\s*diff\b/,
+	/^\s*file\b/,
+	/^\s*stat\b/,
+	/^\s*du\b/,
+	/^\s*df\b/,
+	/^\s*tree\b/,
+	/^\s*which\b/,
+	/^\s*whereis\b/,
+	/^\s*type\b/,
+	/^\s*env\b/,
+	/^\s*printenv\b/,
+	/^\s*uname\b/,
+	/^\s*whoami\b/,
+	/^\s*id\b/,
+	/^\s*date\b/,
+	/^\s*cal\b/,
+	/^\s*uptime\b/,
+	/^\s*ps\b/,
+	/^\s*top\b/,
+	/^\s*htop\b/,
+	/^\s*free\b/,
+	/^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
+	/^\s*git\s+ls-/i,
+	/^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
+	/^\s*yarn\s+(list|info|why|audit)/i,
+	/^\s*node\s+--version/i,
+	/^\s*python\s+--version/i,
+	/^\s*jq\b/,
+	/^\s*sed\s+-n/i,
+	/^\s*awk\b/,
+	/^\s*rg\b/,
+	/^\s*fd\b/,
+	/^\s*bat\b/,
+	/^\s*eza\b/,
+];
+
+export function isSafeCommand(command: string): boolean {
+	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
+	const isSafe = SAFE_PATTERNS.some((p) => p.test(command));
+	return !isDestructive && isSafe;
+}
+
+// Airgap mode: a *tiny* read-only core. Intentionally much smaller than
+// SAFE_PATTERNS. A command must match one of these AND survive every
+// DESTRUCTIVE_PATTERNS check (network, substitution, redirect, find write-flags).
+const AIRGAP_SAFE_PATTERNS = [
+	/^\s*cat\b/,
+	/^\s*grep\b/,
+	/^\s*ls\b/,
+	/^\s*find\b/,
+	/^\s*head\b/,
+	/^\s*tail\b/,
+	/^\s*wc\b/,
+	/^\s*pwd\b/,
+];
+
+export function isAirgapSafeCommand(command: string): boolean {
+	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
+	const isSafe = AIRGAP_SAFE_PATTERNS.some((p) => p.test(command));
+	return !isDestructive && isSafe;
+}
+
+/**
+ * Human-readable reason a command is blocked in airgap mode.
+ * Returns null if the command is actually safe. Reuses the specific reasons
+ * from blockReason for network/substitution/etc., then falls through to the
+ * airgap-specific message.
+ */
+export function airgapBlockReason(command: string): string | null {
+	if (isAirgapSafeCommand(command)) return null;
+	const shared = blockReason(command);
+	if (shared && shared !== "command not on the read-only allowlist") return shared;
+	return "airgap mode allows only: cat, grep, ls, find, head, tail, wc, pwd (local read-only)";
+}
+
+/**
+ * Human-readable reason a command is blocked in plan mode.
+ * Returns null if the command is actually safe. Order matters: report the
+ * most specific (and most commonly surprising) cause first.
+ */
+export function blockReason(command: string): string | null {
+	if (isSafeCommand(command)) return null;
+	if (/\$\(|`/.test(command)) return "command substitution ($(...) or backticks) not allowed";
+	if (/\/dev\/tcp|\/dev\/udp/i.test(command)) return "network access via /dev/tcp or /dev/udp not allowed";
+	if (/\bcurl\b|\bwget\b|\bnc\b|\bncat\b|\bnetcat\b|\bssh\b|\bscp\b|\bftp\b/i.test(command))
+		return "network access not allowed";
+	if (/\bsystem\s*\(|\beval\b|\bexec\b|\bxargs\b|-exec\b|\bbash\s+-c\b|\bsh\s+-c\b/i.test(command))
+		return "interpreter/exec escape not allowed";
+	if (DESTRUCTIVE_PATTERNS.some((p) => p.test(command))) return "destructive command not allowed";
+	return "command not on the read-only allowlist";
+}
+
+export interface TodoItem {
+	step: number;
+	/** Cleaned, truncated text for UI display. */
+	text: string;
+	/** Original full step text for prompts. */
+	rawText: string;
+	completed: boolean;
+}
+
+export function cleanStepText(text: string): string {
+	let cleaned = text
+		.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1") // Remove bold/italic
+		.replace(/`([^`]+)`/g, "$1") // Remove code
+		.replace(
+			/^(Use|Run|Execute|Create|Write|Read|Check|Verify|Update|Modify|Add|Remove|Delete|Install)\s+(the\s+)?/i,
+			"",
+		)
+		.replace(/\s+/g, " ")
+		.trim();
+
+	if (cleaned.length > 0) {
+		cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+	}
+	if (cleaned.length > 50) {
+		cleaned = `${cleaned.slice(0, 47)}...`;
+	}
+	return cleaned;
+}
+
+export function extractTodoItems(message: string): TodoItem[] {
+	const items: TodoItem[] = [];
+	const headerMatch = message.match(/\*{0,2}Plan:\*{0,2}\s*\n/i);
+	if (!headerMatch) return items;
+
+	const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
+	// Capture the full line and let cleanStepText strip markdown. Handling
+	// bold here (\*{0,2} + [^*\n]) truncated steps at the first '*', dropping
+	// any text after a bold span (e.g. "**Read the file** and analyze it").
+	const numberedPattern = /^\s*(\d+)[.)]\s+([^\n]+)/gm;
+
+	for (const match of planSection.matchAll(numberedPattern)) {
+		// Keep rawText as the unmodified captured line (preserves emphasis/code
+		// markers for prompts). Strip balanced bold spans only for the guard checks
+		// and UI text, so trailing text after a bold span survives and lone '*'
+		// (e.g. *.py globs) is preserved.
+		const rawText = match[2].trim();
+		const stripped = rawText.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").trim();
+		if (
+			stripped.length > 5 &&
+			!stripped.startsWith("`") &&
+			!stripped.startsWith("/") &&
+			!stripped.startsWith("-")
+		) {
+			const cleaned = cleanStepText(stripped);
+			if (cleaned.length > 3) {
+				items.push({ step: items.length + 1, text: cleaned, rawText, completed: false });
+			}
+		}
+	}
+	return items;
+}
+
+export function extractDoneSteps(message: string): number[] {
+	const steps: number[] = [];
+	for (const match of message.matchAll(/\[DONE:(\d+)\]/gi)) {
+		const step = Number(match[1]);
+		if (Number.isFinite(step)) steps.push(step);
+	}
+	return steps;
+}
+
+export function markCompletedSteps(text: string, items: TodoItem[]): number {
+	const doneSteps = extractDoneSteps(text);
+	for (const step of doneSteps) {
+		const item = items.find((t) => t.step === step);
+		if (item) item.completed = true;
+	}
+	return doneSteps.length;
+}

@@ -140,9 +140,9 @@ Both sections only run if the corresponding Pi directory already exists.
 
 ## Contributing
 
-- `main` is protected — all changes require a PR with owner approval
+- `main` is protected — all changes require a PR, including the owner (no admin bypass)
 - PRs from non-collaborators are auto-closed
-- Direct pushes to `main` are flagged via GitHub Actions
+- Direct pushes to `main` are rejected server-side and flagged via GitHub Actions
 
 ## Origin
 

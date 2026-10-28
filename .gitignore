@@ -10,6 +10,9 @@ pi/extensions/azure-foundry-models.json
 # Pi extension — machine-specific shim for Valar proxy (local only)
 pi/extensions/valar-strip-reasoning.ts
 
+# Pi extension plan-mode — npm install artifacts (reinstall via `npm install` in the dir)
+pi/extensions/plan-mode/node_modules/
+
 # Rule — machine-specific URL scheme allowlist (local only)
 rules/url-scheme-allowlist.md
 
