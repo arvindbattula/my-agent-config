@@ -610,7 +610,14 @@ sync_pi_extensions() {
         [ -n "$name" ] || continue
         local r="$REPO_DIR/pi/extensions/$name"
         local l="$PI_EXTENSIONS/$name"
-        mkdir -p "$(dirname "$l")"
+        # Creating the parent before the comparison leaves an empty directory
+        # behind for every repo-only extension, even on --status and --dry-run.
+        # Pi scans each subdirectory of the extensions dir, so those empty dirs
+        # become phantom extensions. Create the parent only when a write can
+        # actually follow; every cp to $l below is already DRY_RUN-guarded.
+        if ! $STATUS_ONLY && ! $DRY_RUN; then
+            mkdir -p "$(dirname "$l")"
+        fi
         local status; status=$(compare_file "$r" "$l")
 
         case "$status" in
