@@ -706,6 +706,41 @@ sync_pi_extensions() {
     return 0
 }
 
+# Install npm dependencies for extensions that ship a lockfile. Pi refuses to
+# start when an extension's import cannot resolve, so a sync that copies the
+# code without its dependencies leaves pi unusable. Reinstalls when the synced
+# lockfile is newer than the one npm wrote into node_modules.
+sync_pi_extension_deps() {
+    [ -d "$HOME/.pi/agent" ] || return 0
+
+    local status=0 lock name dir marker
+    for lock in "$REPO_DIR"/pi/extensions/*/package-lock.json; do
+        [ -f "$lock" ] || continue
+        name="$(basename "$(dirname "$lock")")"
+        dir="$PI_EXTENSIONS/$name"
+        marker="$dir/node_modules/.package-lock.json"
+
+        if [ -f "$marker" ] && [ ! "$dir/package-lock.json" -nt "$marker" ]; then
+            echo -e "  ${GREEN}✓${NC} $name ${GRAY}(dependencies installed)${NC}"
+        elif $STATUS_ONLY; then
+            echo -e "  ${YELLOW}!${NC} $name ${GRAY}(dependencies not installed — will install on sync)${NC}"
+        elif $DRY_RUN; then
+            echo -e "  ${BLUE}↓${NC} $name ${GRAY}(would run npm ci)${NC}"
+        elif ! command -v npm >/dev/null 2>&1; then
+            echo -e "  ${RED}✗${NC} $name: npm not found — pi will not start until you run npm ci in $dir"
+            status=1
+        elif (cd "$dir" && npm ci --silent); then
+            echo -e "  ${BLUE}↓${NC} $name ${GRAY}(dependencies installed)${NC}"
+            ((actions_taken++))
+        else
+            echo -e "  ${RED}✗${NC} $name: npm ci failed — pi will not start until it succeeds in $dir"
+            status=1
+        fi
+    done
+
+    return $status
+}
+
 # ─── Pi (~/.agents/skills) ───
 # pi reads skills from ~/.agents/skills. Real skills are symlinked to the repo
 # (live, zero-drift); commands are generated into source-command-* skills since
@@ -784,6 +819,8 @@ sync_pi() {
 }
 
 sync_pi_extensions
+sync_pi_extension_deps
+pi_deps_status=$?
 
 # ─── Pi config files (~/.pi/agent/{models,settings}.json) ───
 # Sync repo pi/models.json and pi/settings.json with ~/.pi/agent/.
@@ -915,4 +952,8 @@ echo ""
 if [ "$pi_status" -ne 0 ]; then
     echo -e "${RED}Pi sync failed (exit $pi_status).${NC}"
     exit "$pi_status"
+fi
+if [ "$pi_deps_status" -ne 0 ]; then
+    echo -e "${RED}Pi extension dependency install failed.${NC}"
+    exit "$pi_deps_status"
 fi

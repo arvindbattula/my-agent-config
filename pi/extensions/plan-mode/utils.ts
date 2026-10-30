@@ -373,6 +373,16 @@ export function checkHash(stepNumber: number, command: string): string {
 	return createHash("sha256").update(`${stepNumber}|${command}`).digest("hex").slice(0, 16);
 }
 
+/**
+ * Adds the fix to a Linux missing-dependency failure. The runtime names what is
+ * missing but not how to install it. Other failures (e.g. WSL1's "Unsupported
+ * platform") pass through, since installing packages would not fix them.
+ */
+export function describeSandboxInitFailure(message: string): string {
+	if (!/bubblewrap|socat|ripgrep/.test(message)) return message;
+	return `${message} — install bubblewrap, socat and ripgrep (plan-mode README, "Linux prerequisites")`;
+}
+
 /** Project-local plan-mode config: `.pi/plan-mode.json` (all optional). */
 export interface PlanModeConfig {
 	/** Harness-verified step completion (Phase 3). Default: true. */

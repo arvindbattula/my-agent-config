@@ -13,16 +13,16 @@ Personal Claude Code configuration — skills, commands, rules, and settings, sy
 
 ## Structure
 
-- `skills/` — Auto-triggered by Claude when relevant (17 skills)
-- `commands/` — User-invoked via `/` in Claude Code (17 commands)
-- `rules/` — Always-on behavioral guidelines (16 rules)
+- `skills/` — Auto-triggered by Claude when relevant (18 skills)
+- `commands/` — User-invoked via `/` in Claude Code (18 commands)
+- `rules/` — Always-on behavioral guidelines (21 rules)
 - `hooks/` — Session lifecycle hooks (session-start, compress-memory, design-antipattern-check, design-antipattern-prevent, protect-paths, command-policy, stop-gate, session-end)
 - `settings.json` — Permissions, plugins, preferences
 - `statusline.sh` — Terminal status bar (context usage, git info)
 
 ## Self-Improving Workflow
 
-The engineering workflow (`/idea-refine` → `/discover` → `/blueprint` → `/construct` → `/inspect` → `/ship` → `/retro`) is self-improving:
+The engineering workflow (`/idea-refine` → `/scaffold` → `/discover` → `/blueprint` → `/construct` → `/inspect` → `/ship` → `/retro`) is self-improving:
 
 - Each skill has a `## Performance Notes` section updated by `/retro`
 - `/retro` extracts both blind spots (what went wrong) and positive patterns (what worked)

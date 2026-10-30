@@ -53,6 +53,28 @@ While plan or airgap mode is active, **every bash command runs inside an OS-leve
 - Kill switch: `pi --no-plan-sandbox` disables the kernel layer (allowlist still applies).
 - Verified by `node tests/run.mjs --sandbox` (11 kernel probes) — writes, network, and the regex-bypass vectors (`sh -c`, `git --output`, `sort -o`) all fail at the OS level.
 
+#### Install the dependency (all platforms)
+
+`./install.sh` installs it with `npm ci`, and `--status` reports when it is missing. To run the tests from a repo checkout, also run `npm install` in this directory.
+
+Without the dependency, `pi` exits with `Cannot find module '@anthropic-ai/sandbox-runtime'`, even when no planning mode was requested. `pi -ne` starts without extensions, and therefore without plan mode or airgap.
+
+#### Linux prerequisites
+
+Beyond the npm dependency, macOS needs nothing extra. Linux needs three binaries on `PATH`; if any is missing, the sandbox cannot initialize, so airgap blocks all bash and plan mode falls back to the allowlist.
+
+```bash
+sudo apt-get install bubblewrap socat ripgrep   # Debian/Ubuntu
+sudo dnf install bubblewrap socat ripgrep       # Fedora
+sudo pacman -S bubblewrap socat ripgrep         # Arch
+```
+
+- **Ubuntu 24.04+:** bubblewrap also needs capability-bearing user namespaces, which AppArmor restricts by default. Run `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`, or add an AppArmor profile granting `userns` to the relevant binaries.
+- **WSL1 is unsupported** (bubblewrap does not run there); use WSL2.
+- **Docker:** the default container profile stops bubblewrap creating namespaces, and unconfined seccomp/AppArmor is not enough. It works in a `--privileged` container, which gives up much of the container's own isolation.
+- **Blocked namespaces look different from missing binaries:** the sandbox still reports ready, then every bash command fails with a `bwrap:` error, including in plan mode (no allowlist fallback). Nothing runs unsandboxed.
+- Confirm with `node tests/run.mjs --sandbox` from this directory. Require S-02 (read allowed) to pass: if bubblewrap cannot start, the denial probes pass without proving anything.
+
 ### Plan Mode (Read-Only)
 - Built-in `edit`/`write` disabled; other active tools (read, bash, grep, find, ls, questionnaire, memory tools) remain available
 - Bash commands filtered through the allowlist AND executed in the kernel sandbox
