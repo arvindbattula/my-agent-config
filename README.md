@@ -15,6 +15,9 @@ cd my-agent-config
 
 # Preview changes without modifying anything
 ./install.sh --dry-run
+
+# Install for the Pi coding agent only — never writes to ~/.claude
+./install.sh --pi-only --force
 ```
 
 ## What's Inside
@@ -135,6 +138,8 @@ Beyond `~/.claude/`, `install.sh` also syncs Pi coding agent resources when pres
 - **Pi extensions** (`~/.pi/agent/extensions`) — repo `pi/extensions/*.ts` are copied there (auto-discovered by the Pi CLI). Personal extensions not in the repo (e.g. `azure-foundry.ts`) show as `+ local only` and are never pulled in automatically.
 
 Both sections only run if the corresponding Pi directory already exists.
+
+`--pi-only` inverts the default: it runs just those two Pi sections plus `~/.pi/agent/{models,settings}.json`, and skips everything that writes to `~/.claude/` — skills, commands, rules, hooks, bin, `settings.json`, and `statusline.sh`. Backups go to `~/.pi/agent/backups/` instead, so a Pi-only machine never grows a `~/.claude` tree. If neither Pi directory exists, the run exits 1 with a message rather than silently doing nothing.
 
 > **Note:** A running Claude Code session manages `~/.claude/settings.json` in memory and may overwrite external changes. If `settings.json` shows as "differs" after sync, exit all Claude Code sessions first, then run `./install.sh` again.
 

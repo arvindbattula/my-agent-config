@@ -9,6 +9,7 @@ Personal Claude Code configuration — skills, commands, rules, and settings, sy
 ./install.sh --dry-run    # Preview changes without modifying anything
 ./install.sh --force      # Sync without confirmation (for fresh machine setup)
 ./install.sh --status     # Show sync status only
+./install.sh --pi-only    # Sync pi targets only (~/.pi/agent, ~/.agents) — never touches ~/.claude
 ```
 
 ## Structure
