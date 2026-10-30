@@ -25,7 +25,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import { loadPlanModeConfig } from "./utils.ts";
+import { describeSandboxInitFailure, loadPlanModeConfig } from "./utils.ts";
 
 /** Fixed airgap denyRead list — owner decision (b). Airgap is never configurable. */
 export const AIRGAP_DENY_READ = ["~/.ssh", "~/.aws", "~/.gnupg", ".env", ".env.*", "*.pem", "*.key"];
@@ -85,7 +85,7 @@ export async function ensureSandbox(config: SandboxRuntimeConfig, key: string): 
 		return true;
 	} catch (e) {
 		policyKey = null;
-		initError = e instanceof Error ? e.message : String(e);
+		initError = describeSandboxInitFailure(e instanceof Error ? e.message : String(e));
 		return false;
 	}
 }

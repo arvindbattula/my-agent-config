@@ -103,6 +103,9 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `path-containment-after-regex` | Pair regex path gates with segment check + post-resolve containment (and realpath for symlink threats) |
 | `no-unsourced-claims` | Never invent stats; tag quantitative claims as sourced/estimate/opinion; don't smuggle opinions as facts |
 | `skill-completion-receipt` | For 2+ step skills/commands, print a per-step receipt (✓/✗/N/A) before claiming done |
+| `check-docs-first` | For external libraries and APIs, check memory, then current docs; save non-obvious quirks to memory |
+| `keep-going-when-clear` | When the next step is clear, keep going instead of stopping to report or offer; still stop when ambiguous or destructive |
+| `verify-edit-batches` | After a multi-edit batch, diff against a backup and count hunks before claiming success |
 
 ### Hooks
 | Hook | Trigger | Purpose |
@@ -110,6 +113,13 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `session-start.sh` | SessionStart | Brief workflow reminder injected at session start |
 | `compress-memory.sh` | PostToolUse → Write | Auto-compress prose in memory files (filler removal, phrase shortening). Preserves frontmatter, code, URLs, paths. Validates before writing, restores on corruption. |
 | `design-antipattern-check.sh` | PostToolUse → Edit/Write | Detects AI design anti-patterns (Inter font, purple gradients, side-stripe borders, gradient text, #000/#fff, HSL) in frontend files and warns inline |
+| `design-antipattern-prevent.sh` | PreToolUse → Edit/Write | Blocks design anti-patterns in frontend files before they reach disk; the post-write check and stop gate remain as a backstop |
+| `protect-paths.sh` | PreToolUse → Edit/Write | Blocks edits to `.env` files, `.git/`, `generated/`, and paths outside the project (except the Claude scratchpad, plan files, and auto-memory). Fails closed if `jq` is missing or the payload is unreadable. |
+| `command-policy.sh` | PreToolUse → Bash | Conservative denylist: blocks `rm -rf` on root/home/cwd/parent, `DROP`/`TRUNCATE TABLE`, reading `.env` files, and force-pushes to `main`/`master`; scoped `rm -rf` and force-pushes to feature branches stay allowed |
+| `stop-gate.sh` | Stop | Blocks completion while the current session's design gate still lists failing files; gates from earlier sessions are ignored |
+| `session-end.sh` | SessionEnd | Appends a JSONL audit record to `reports/session-audit.log`; always exits 0 |
+
+`design-checks-lib.sh` holds the checks shared by both design hooks. `hooks.test.sh` is the test suite.
 
 ### Config
 - `settings.json` — Permissions, hooks, extended thinking, plugins, statusline
