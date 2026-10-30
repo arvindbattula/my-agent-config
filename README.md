@@ -69,6 +69,12 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 
 **Self-improving workflow:** Each workflow command has a `## Performance Notes` section that `/retro` populates with dated, evidence-backed observations. Patterns validated across 3+ projects get proposed as actual skill instruction changes. Positive engineering patterns (validated tech choices, architectural approaches) persist in auto-memory and feed into `/discover` and `/blueprint`.
 
+**Project initialization:**
+
+| Command | Purpose |
+|---------|---------|
+| `/init-python` | Initialize a new Python uv project, derives directory + package, sets up `src/` layout, hatchling build, standard deps |
+
 **Utility commands:**
 
 | Command | Purpose |
