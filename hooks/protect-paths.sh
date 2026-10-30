@@ -2,7 +2,7 @@
 # PreToolUse hook: block edits/writes to protected paths before they happen.
 # Protected: .env files, .git/ directory contents, generated/ prefix,
 # and any path resolving outside the project root (cwd) — except the Claude
-# session scratchpad (<temp>/claude/), plan files (~/.claude/plans/), and
+# session scratchpad (<temp>/claude[-<uid>]/), plan files (~/.claude/plans/), and
 # auto-memory (~/.claude/projects/*/memory/), which Claude Code directs
 # sessions to write and which live outside the project by design.
 # Exit 2 = block the tool call. Exit 0 = allow.
@@ -98,23 +98,28 @@ CWD_ABS=$(cd "$CWD" 2>/dev/null && pwd 2>/dev/null || echo "$CWD")
 # written at Claude Code's direction. Checked only for paths that already
 # failed the inside-project test, so a project living under one of these
 # roots still gets the .env/.git/generated checks.
-#   <system-temp>/claude/*          session scratchpads. Every plausible temp
+#   <system-temp>/claude/* and <system-temp>/claude-<uid>/*
+#                                   session scratchpads. Every plausible temp
 #     root is tried through the same normalizer as the file path so Windows
 #     (cygpath collapses AppData\Local\Temp to /tmp), macOS ($TMPDIR=
-#     /var/folders/...) and plain /tmp all match. Only the claude/ subtree,
-#     not all of temp. Any session's scratchpad matches, not just this
-#     one's — accepted, it is ephemeral temp data.
+#     /var/folders/...) and plain /tmp all match. Each root is also tried
+#     under /private: normalize keeps symlinks, so macOS's real /private/tmp
+#     never matches /tmp. Only those subtrees, not all of temp, and only this
+#     user's uid. Any session's scratchpad matches, not just this one's —
+#     accepted, it is ephemeral temp data.
 #   ~/.claude/plans/*               plan-mode files
 #   ~/.claude/projects/*/memory/*   auto-memory
 # The rest of ~/.claude (settings.json, hooks) stays protected.
 outside_root_exempt() {
-  local tmp_cand tmp_root home_abs
+  local tmp_cand tmp_root home_abs uid
+  uid="$(id -u)"
   for tmp_cand in "${TMPDIR:-}" "${TMP:-}" "${TEMP:-}" /tmp; do
     [ -z "$tmp_cand" ] && continue
     tmp_root="$(normalize "$tmp_cand")"
     tmp_root="${tmp_root%/}"
     case "$NORMALIZED" in
-      "$tmp_root"/claude/*) return 0 ;;
+      "$tmp_root"/claude/*|"$tmp_root"/claude-"$uid"/*) return 0 ;;
+      /private"$tmp_root"/claude/*|/private"$tmp_root"/claude-"$uid"/*) return 0 ;;
     esac
   done
   home_abs="$(normalize "$HOME")"
