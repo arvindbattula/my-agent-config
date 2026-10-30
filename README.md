@@ -103,6 +103,7 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 | `path-containment-after-regex` | Pair regex path gates with segment check + post-resolve containment (and realpath for symlink threats) |
 | `no-unsourced-claims` | Never invent stats; tag quantitative claims as sourced/estimate/opinion; don't smuggle opinions as facts |
 | `skill-completion-receipt` | For 2+ step skills/commands, print a per-step receipt (✓/✗/N/A) before claiming done |
+| `maintain-readme` | Update `README.md` when project structure, modules, or run instructions change; defines required sections and when NOT to update |
 
 ### Hooks
 | Hook | Trigger | Purpose |
