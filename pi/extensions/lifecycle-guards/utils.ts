@@ -134,8 +134,9 @@ const COMMAND_DENY_PATTERNS: DenyPattern[] = [
 	{ pattern: /\brm\s+-rf\s+\.\.(\/|\s|$)/, reason: "destructive recursive delete (rm -rf parent)" },
 	// Destructive database commands
 	{ pattern: /\b(drop|truncate)\s+table\b/i, reason: "destructive database command (DROP/TRUNCATE TABLE)" },
-	// Reading env/secret files
-	{ pattern: /\b(cat|less|more|tail|head)\s+.*\.env\b/, reason: "reading env/secrets file" },
+	// Reading env/secret files. Stays within one command: stops at | ; & and
+	// newlines (the bash hook's grep is line-based) but steps over 2>&1-style redirects.
+	{ pattern: /\b(cat|less|more|tail|head)\s+([^|;&\n]|[<>]&|&>)*\.env\b/, reason: "reading env/secrets file" },
 	// Force-pushing to protected branches
 	{ pattern: /git\s+push.*--force.*\b(main|master)\b/, reason: "force-pushing to protected branch (main/master)" },
 	{ pattern: /git\s+push.*\s-f\b.*\b(main|master)\b/, reason: "force-pushing to protected branch (main/master)" },

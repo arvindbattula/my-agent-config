@@ -135,6 +135,19 @@ cp_run "rm -rf ../sibling";           expect_exit "block rm -rf ../sibling" 2
 cp_run "DROP TABLE users";            expect_exit "block DROP TABLE" 2
 cp_run "truncate table logs";         expect_exit "block TRUNCATE TABLE" 2
 cp_run "cat .env";                    expect_exit "block cat .env" 2
+cp_run "cat config/.env";             expect_exit "block cat config/.env" 2
+cp_run "cat ./.env.local";            expect_exit "block cat ./.env.local" 2
+cp_run "cat a.txt .env";              expect_exit "block .env as a later argument" 2
+cp_run "cat .env.example";            expect_exit "block cat .env.example" 2
+cp_run 'head -5 "$HOME/.env"';        expect_exit "block quoted home .env" 2
+cp_run "cat prod.env";                expect_exit "block cat prod.env" 2
+cp_run "cat a; cat .env";             expect_exit "block .env in a later command" 2
+cp_run "cat < .env";                  expect_exit "block cat from stdin redirect" 2
+cp_run "cat a 2>&1 .env";             expect_exit "block .env after 2>&1" 2
+cp_run "cat README.md | grep '\.env'"; expect_exit "allow .env in a later pipe stage" 0
+cp_run "tail -5 log.txt && echo .env"; expect_exit "allow .env after &&" 0
+cp_run "grep -n x f | head -3; grep .env other"; expect_exit "allow .env after ;" 0
+cp_run "$(printf 'cat README.md\necho .env')"; expect_exit "allow .env on the next line" 0
 cp_run "git push --force origin main";expect_exit "block force-push main" 2
 cp_run "git push -f origin master";   expect_exit "block -f push master" 2
 cp_run "rm -rf build/";               expect_exit "allow rm -rf build/" 0

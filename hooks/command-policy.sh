@@ -34,7 +34,8 @@ if [ -z "$BLOCKED" ] && echo "$NORMALIZED" | grep -qiE '\b(drop|truncate)\s+tabl
 fi
 
 # --- Reading env/secret files ---
-if [ -z "$BLOCKED" ] && echo "$NORMALIZED" | grep -qE '\b(cat|less|more|tail|head)\s+.*\.env\b' 2>/dev/null; then
+# Stays within one command: stops at | ; & but steps over redirects like 2>&1.
+if [ -z "$BLOCKED" ] && echo "$NORMALIZED" | grep -qE '\b(cat|less|more|tail|head)\s+([^|;&]|[<>]&|&>)*\.env\b' 2>/dev/null; then
   BLOCKED="reading env/secrets file"
 fi
 
