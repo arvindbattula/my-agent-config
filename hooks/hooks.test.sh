@@ -75,7 +75,7 @@ pp_from "/private/tmp/claude-99999/x.txt";         expect_exit "block another us
 pp_from "$TMP/claude-$PP_UID-evil/x.txt";          expect_exit "block name extending claude-<uid>" 2
 pp_from "/private/tmp/no-claude/x.txt";            expect_exit "block /private/tmp outside claude subtree" 2
 pp_from "/private/tmp/claude-$PP_UID/../escape.txt"; expect_exit "block traversal out of claude-<uid>" 2
-pp_from "$HOME/.claude/plans/x.md";         expect_exit "allow plan-mode file in ~/.claude/plans" 0
+pp_from "$HOME/.claude/plans/x.md";          expect_exit "allow plan-mode file in ~/.claude/plans" 0
 pp_from "$HOME/.claude/projects/some-proj/memory/note.md"; expect_exit "allow auto-memory file" 0
 
 # Fail-closed tiers
