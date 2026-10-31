@@ -16,8 +16,14 @@ if [ -z "$CWD" ]; then
   CWD="$(pwd)"
 fi
 
+# A Bash cd moves CWD but not CLAUDE_PROJECT_DIR. Same rule as stop-gate.sh.
+STATE_ROOT="$CWD"
+case "${CLAUDE_PROJECT_DIR:-}" in
+  /*|[A-Za-z]:*) if [ -d "$CLAUDE_PROJECT_DIR" ]; then STATE_ROOT="$CLAUDE_PROJECT_DIR"; fi ;;
+esac
+
 # Create reports directory if it doesn't exist
-REPORTS_DIR="$CWD/reports"
+REPORTS_DIR="$STATE_ROOT/reports"
 mkdir -p "$REPORTS_DIR" 2>/dev/null || exit 0
 
 # Build JSONL record
