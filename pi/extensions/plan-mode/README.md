@@ -24,7 +24,7 @@ Read-only exploration mode for safe code analysis.
 ## Usage
 
 1. Enable plan mode with `/plan` or `--plan` flag
-2. The agent works in phases: **clarify** (interviews you via the `questionnaire` tool, or in plain text under `--print` — highest-leverage questions first, 5–10 max; the model may read code first, see AUDIT.md), **explore** (reads the code, notes files touched and likely conflicts), **plan**, **self-review** (re-checks against your goals, flags its least-confident step)
+2. The agent works in phases: **orient** (a few reads at most, to make its questions specific), **clarify** (interviews you via the `questionnaire` tool, or in plain text under `--print` — highest-leverage questions first, 5–10 max — and waits for your answers), **explore** (reads the code, notes files touched and likely conflicts), **plan**, **self-review** (re-checks against your goals, flags its least-confident step)
 3. The plan is a numbered list under a `Plan:` header, each step in the form:
 
 ```
@@ -128,6 +128,8 @@ Blocked (segment head or content):
 - Pagers: `less`, `more` (no TTY in pi's bash; closes pager escapes)
 - `env` with any arguments or assignments (`LD_PRELOAD=…`, `PAGER=sh git …`)
 - System: `sudo`, `kill`, `reboot`, editors (`vim`, `nano`, `code`)
+
+A blocked command leaves the turn running so the model can try something else. Repeating it, or three blocks in a row, ends the turn.
 
 The allowlist is a guardrail; the kernel sandbox is the boundary, unless it failed
 to initialize — see AUDIT.md. Airgap mode

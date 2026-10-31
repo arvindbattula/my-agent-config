@@ -5,7 +5,7 @@
  * wiring reviewed in code + manual no-spam check (AUDIT.md).
  */
 
-import { shouldSuggestPlan } from "../utils.ts";
+import { endsTurnAfterBlock, shouldSuggestPlan } from "../utils.ts";
 
 let failures = 0;
 const check = (label, expected, actual) => {
@@ -15,6 +15,13 @@ const check = (label, expected, actual) => {
 };
 
 // ── suggest (keyword hits) ──
+// A blocked command must leave the model a chance to try something else, and
+// repeats must stop rather than burn round-trips.
+check("P4-B1 first block continues", false, endsTurnAfterBlock("npm test", null, 1));
+check("P4-B2 repeated block ends the turn", true, endsTurnAfterBlock("npm test", "npm test", 2));
+check("P4-B3 a different command continues", false, endsTurnAfterBlock("make", "npm test", 2));
+check("P4-B4 alternating commands stop at the cap", true, endsTurnAfterBlock("make", "npm test", 3));
+
 check("P4-01 refactor keyword", true, shouldSuggestPlan("Please refactor the authentication module to use the new token service"));
 check("P4-02 migration keyword", true, shouldSuggestPlan("We need to migrate the whole API surface off REST and onto the new RPC layer"));
 check("P4-03 multi-file phrase", true, shouldSuggestPlan("This change touches several files in the checkout flow, so please be careful with it"));

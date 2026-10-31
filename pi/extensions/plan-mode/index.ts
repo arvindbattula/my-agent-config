@@ -32,7 +32,7 @@ import {
 	sandboxInitError,
 	teardownSandbox,
 } from "./sandbox.ts";
-import { airgapBlockReason, blockReason, checkHash, extractTodoItems, loadPlanModeConfig, markCompletedSteps, shouldSuggestPlan, type TodoItem } from "./utils.ts";
+import { airgapBlockReason, blockReason, checkHash, endsTurnAfterBlock, extractTodoItems, loadPlanModeConfig, markCompletedSteps, shouldSuggestPlan, type TodoItem } from "./utils.ts";
 
 /** Tool name for the step-completion tool, also used in active-tool management. */
 const PLAN_STEP_DONE_TOOL = "plan_step_done";
@@ -175,6 +175,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	// Dedupe block notifications: skip notifying if the same command was just blocked
 	// (the model often retries a rejected command several times).
 	let lastBlockedCommand: string | null = null;
+	let consecutiveBlocks = 0;
 
 	// ── Phase 2: kernel sandbox (see sandbox.ts + AUDIT.md) ─────────────
 	// The built-in bash tool is overridden below (extension tools win over
@@ -471,6 +472,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			executionMode = false;
 			todoItems = [];
 			lastBlockedCommand = null;
+			consecutiveBlocks = 0;
 			// normalModeTools holds the full snapshot from when airgap was entered.
 			// Switch to the broader plan-mode tool set (preserves injected tools).
 			pi.setActiveTools(getPlanModeTools(normalModeTools ?? withoutPlanStepDone(pi.getActiveTools())));
@@ -487,6 +489,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		executionMode = false;
 		todoItems = [];
 		lastBlockedCommand = null;
+		consecutiveBlocks = 0;
 
 		if (planModeEnabled) {
 			// Snapshot current tools so we can restore them exactly on exit.
@@ -516,6 +519,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		executionMode = false;
 		todoItems = [];
 		lastBlockedCommand = null;
+		consecutiveBlocks = 0;
 
 		if (turningOn) {
 			// Only snapshot when entering from a full-access state (not already in
@@ -642,6 +646,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		const command = event.input.command as string;
 		const why = airgapMode ? airgapBlockReason(command) : blockReason(command);
 		if (why) {
+			consecutiveBlocks++;
+			const endTurn = endsTurnAfterBlock(command, lastBlockedCommand, consecutiveBlocks);
 			if (command !== lastBlockedCommand) {
 				ctx.ui.notify(`⏸ Plan mode blocked (${why}): ${command}`, "warning");
 				lastBlockedCommand = command;
@@ -649,13 +655,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			return {
 				block: true,
 				reason: `Plan mode: ${why}. Use /plan to disable plan mode first.\nCommand: ${command}`,
-				// Phase 1: when this call is the only tool call in an all-terminating
-				// batch, stop without another model call — the model just retried the
-				// same blocked command; don't let it burn a round-trip on a re-ask.
-				terminate: true,
+				// The first block keeps the turn alive so the model can use an allowed
+				// command or ask the user. Repeats end it, so they don't burn round-trips.
+				terminate: endTurn,
 			};
 		}
 		lastBlockedCommand = null;
+		consecutiveBlocks = 0;
 	});
 
 	// Phase 2: user-typed !/!! commands get the same kernel boundary in
@@ -760,6 +766,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	// double-inject plan-execution-context on those turns. Verified against 1.4.0
 	// agent-session.js (_prepareRun fires only for fresh runs, never continue()).
 	pi.on("before_agent_start", async (event) => {
+		lastBlockedCommand = null;
+		consecutiveBlocks = 0;
 		if (event.messageType !== "user") return;
 		if (airgapMode) {
 			return {
@@ -778,10 +786,11 @@ Restrictions:
 - Use the questionnaire tool for clarifying questions
 
 Work in phases:
-1. Clarify: interview me via questionnaire on anything that would change the plan - highest-leverage questions first, 5-10 max.
-2. Explore: read the relevant code locally; note files touched and what will fight the plan.
-3. Plan: numbered steps under a "Plan:" header - each step: N. <action> - done when: <condition> (files: <paths>) - plus a short "Risks:" section.
-4. Self-review against my goals; flag your least-confident step.
+1. Orient: a few reads at most, and only if they make your questions more specific.
+2. Clarify: interview me via questionnaire on anything that would change the plan - highest-leverage questions first, 5-10 max. Wait for my answers before exploring further.
+3. Explore: read the relevant code locally; note files touched and what will fight the plan.
+4. Plan: numbered steps under a "Plan:" header - each step: N. <action> - done when: <condition> (files: <paths>) - plus a short "Risks:" section.
+5. Self-review against my goals; flag your least-confident step.
 
 Produce the plan only after clarifying and exploring. Do NOT attempt changes.`,
 					display: false,
@@ -809,10 +818,11 @@ Restrictions:
 - Other active tools keep their normal capabilities (memory tools may read/write their own store)
 
 Work in phases - do not jump straight to a plan:
-1. Clarify: use the questionnaire tool to interview me about anything that would change the plan (requirements, edge cases, failure modes, decisions that depend on each other). Ask the highest-leverage questions first; stop at 5-10 questions or when nothing material is left open.
-2. Explore: read the relevant code before proposing anything. Note which files each part of the work touches, and what in the existing code will fight the plan (coupling, hidden invariants, conflicting patterns).
-3. Plan: write a numbered plan under a "Plan:" header. Each step: N. <action> - done when: <observable condition> [Verify: <command>] (files: <paths touched>). If the task is architectural, first list 2-3 plausible approaches with tradeoffs and name your recommendation. End with a short "Risks:" section (what could go wrong, and what will fight this plan).
-4. Self-review: before presenting, re-check the plan against my stated goals, fix any mismatch, and flag the step you are least confident about - say why.
+1. Orient: a few reads at most, and only if they make your questions more specific. Don't explore in depth yet.
+2. Clarify: use the questionnaire tool to interview me about anything that would change the plan (requirements, edge cases, failure modes, decisions that depend on each other). Ask the highest-leverage questions first; stop at 5-10 questions or when nothing material is left open. Wait for my answers before exploring further.
+3. Explore: read the relevant code before proposing anything. Note which files each part of the work touches, and what in the existing code will fight the plan (coupling, hidden invariants, conflicting patterns).
+4. Plan: write a numbered plan under a "Plan:" header. Each step: N. <action> - done when: <observable condition> [Verify: <command>] (files: <paths touched>). If the task is architectural, first list 2-3 plausible approaches with tradeoffs and name your recommendation. End with a short "Risks:" section (what could go wrong, and what will fight this plan).
+5. Self-review: before presenting, re-check the plan against my stated goals, fix any mismatch, and flag the step you are least confident about - say why.
 
 Self-routing: when later asked to do multi-file or architecturally ambiguous work outside plan mode, recommend starting a plan with /plan first.
 

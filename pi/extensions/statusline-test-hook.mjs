@@ -26,6 +26,9 @@ export async function resolve(specifier, context, next) {
 	if (specifier === "@earendil-works/pi-tui") {
 		return { url: pathToFileURL(piTuiDist).href, shortCircuit: true };
 	}
+	if (specifier === "typebox") {
+		return next(specifier, { ...context, parentURL: pathToFileURL(join(piPackageDir("typebox"), "package.json")).href });
+	}
 	if (specifier.startsWith(".") && !/\.[mc]?[jt]s$/.test(specifier)) {
 		const candidate = new URL(specifier + ".ts", context.parentURL);
 		if (existsSync(fileURLToPath(candidate))) {
