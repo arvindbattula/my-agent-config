@@ -767,7 +767,7 @@ the pre-phase files); `shouldSuggestPlan` in utils.ts is inert without the handl
 - **Clarify-first: partial pass.** Real model (valar, GLM-5.2), 3 vague prompts with `--print`.
   In a clean project all three ended in clarifying questions with no plan.
 
-Findings from the clarify-first run. Number 1 is fixed (see the follow-up below); 2 and 3 are open:
+Findings from the clarify-first run, all addressed in the follow-ups below:
 1. **`questionnaire` did not exist.** The tool was not defined in this repo or the installed
    extensions, yet the plan prompts and the Refine interview told the model to use it. The model
    fell back to plain-text questions. In `--print` there was no way to answer them.
@@ -777,6 +777,12 @@ Findings from the clarify-first run. Number 1 is fixed (see the follow-up below)
    `terminate: true` stopped the session with no questions and exit 0.
 
 Follow-up changes (2026-10-30):
+- **Orient added before Clarify.** Forbidding reads would make the questions worse, so the prompts
+  now allow a few reads to make questions specific, then require waiting for answers before
+  exploring. This changes the prompt to match reasonable behaviour.
+- **Blocked commands no longer end the turn on the first block.** Repeating a command, or 3 blocks
+  in a row, ends it (`endsTurnAfterBlock`). The count resets each user turn. Airgap's fail-closed
+  block still ends the turn, because all bash is unavailable there.
 - **`questionnaire` added** as `pi/extensions/questionnaire.ts`, from Pi 1.4.0's example. With a
   scripted model: the UI appears, the answer reaches the model, cancelling keeps the session
   working, `--print` returns an error instead of hanging, the tool is available in plan and airgap

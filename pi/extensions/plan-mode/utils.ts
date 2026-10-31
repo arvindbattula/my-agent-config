@@ -369,6 +369,17 @@ export interface TodoItem {
 }
 
 /** Stable per-plan hash of a check definition (audit/lock trail). */
+/** Consecutive blocked commands allowed before the turn ends. */
+const BLOCK_TURN_CAP = 3;
+
+/**
+ * A first block leaves the turn running so the model can try something else;
+ * repeating a command, or hitting the cap, ends it so no more round-trips are spent.
+ */
+export function endsTurnAfterBlock(command: string, lastBlocked: string | null, consecutiveBlocks: number): boolean {
+	return command === lastBlocked || consecutiveBlocks >= BLOCK_TURN_CAP;
+}
+
 export function checkHash(stepNumber: number, command: string): string {
 	return createHash("sha256").update(`${stepNumber}|${command}`).digest("hex").slice(0, 16);
 }

@@ -67,6 +67,7 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
 | `session-stats.test.mjs` | — | `computeSessionTotals` cost/token totals parity with pi's `getUsageCostBreakdown`; `formatTokens`/`sanitizeStatusText` |
 | `statusline.test.mjs` | 5 | `render()` does not crash when ExtensionAPI lacks `getSettings()` (feynman's bundled pi 0.84.x); ` (auto)` marker honors `compaction.enabled` when present. Uses `statusline-test-hook.mjs` to alias `@earendil-works/pi-tui` |
+| `questionnaire.test.mjs` | 6 | The real question UI: answer, cancel and the non-interactive error; plan mode's tool lists; the copy still matches Pi's example |
 | `plan-mode/tests/run.mjs` | — | Red-team corpus gate for the bash allowlist. `--sandbox` runs the kernel probes |
 | `plan-mode/tests/phase3.mjs` | — | Verified step completion: check extraction, hashing and config |
 | `plan-mode/tests/phase4.mjs` | — | Trigger-assist hit and abstain cases |
@@ -76,7 +77,7 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details. Depends on `@anthropic-ai/sandbox-runtime`, which `install.sh` installs with `npm ci`. Linux also needs the prerequisites in that README for the kernel sandbox.
 
 ### `questionnaire.ts`
-The tool plan mode uses to ask you structured questions: clarifying, Refine's interview and paused steps. Copied from Pi 1.4.0's `examples/extensions/questionnaire.ts`, because Pi doesn't register it by default. Compare it with the example after a Pi update. Outside the terminal UI (`--print`) it returns an error, so the model has to ask in plain text.
+The tool plan mode uses to ask you structured questions: clarifying, Refine's interview and paused steps. Copied from Pi 1.4.0's `examples/extensions/questionnaire.ts`, because Pi doesn't register it by default. `questionnaire.test.mjs` fails when Pi's example changes, so review the copy then. Outside the terminal UI (`--print`) it returns an error, so the model has to ask in plain text.
 
 ### `zz-auto-continue/`
 Queues a continuation message after non-retrying compaction so the agent keeps going without manual "continue." Circuit breaker: max 5 auto-continues per user-initiated run.
