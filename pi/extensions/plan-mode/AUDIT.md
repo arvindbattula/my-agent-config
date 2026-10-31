@@ -703,10 +703,12 @@ PASS (14 checks), corpus 117/117, sandbox tier 11/11, tsc strict clean; diff vs.
 ### Not automated (honest scope note)
 The full `plan_step_done` gating loop can't run headless (the Execute flow needs interactive
 UI). Unit tests cover extraction/hash/config; `runCheck`'s spawn pattern is the same as the
-Phase 2 ops (proven live). Manual live gate for the owner: run `/plan` on a real task, ensure
-one step carries `[Verify: false]`-style always-failing check — e.g. `[Verify: false]` — try
-`plan_step_done` → expect refusal + attempt counter; fix (e.g. edit to `[Verify: true]` in a
-refine pass) → passes → `✓✓` in widget.
+Phase 2 ops (proven live). Manual live gate for the owner: run `/plan` on a real task with at
+least two steps, one carrying a check that starts out failing, e.g. `[Verify: test -f done.flag]`.
+Try `plan_step_done` → expect refusal + attempt counter; create the flag and retry → passes →
+`✓✓` in widget. Changing the check itself can't work: Refine exists only before Execute, and
+checks are hash-locked. With a one-step plan the widget is replaced by "Plan Complete!" at once,
+so `✓✓` never shows.
 
 ### Rollback
 `cp tests/pre-phase3/{index,utils}.ts .` restores pre-Phase-3 state; `"verifySteps": false` in
@@ -744,12 +746,33 @@ human). 4 hunks vs. `tests/pre-phase4/` (import, handler block, prompt line; 1 u
 
 Verified: `tests/phase4.mjs` 12/12 (hit/abstain matrix incl. dedup and directness markers);
 full battery green (corpus 117/117, sandbox 11/11, phase3 ALL PASS, tsc strict clean).
-Manual no-spam check for the owner: in a fresh session, send a refactor-shaped prompt → one
-hint; send another → silence; send "just fix X quickly" → silence throughout.
+Manual no-spam check for the owner: in a fresh session, send a refactor-shaped prompt of 40+
+characters → one hint; send another → silence. In a second fresh session, send a 40+ character
+prompt with a keyword and a directness marker → no hint. A later "just fix X quickly" in the
+first session proves nothing: the latch silences everything, and it is under the 40-char minimum.
 
 ### Rollback
 Remove the `pi.on("input")` block + the import + the prompt line (`tests/pre-phase4/` has
 the pre-phase files); `shouldSuggestPlan` in utils.ts is inert without the handler.
+
+## Live gate results (2026-10-30, pi 1.4.0)
+
+- **Verify gate: pass.** Real pi in a terminal with a scripted model, Linux container. First
+  `plan_step_done` refused ("attempt 1/8"), accepted after the flag existed, `✓✓` in the widget,
+  footer `1/2 (1✓)`.
+- **No-spam nudge: pass.** Same setup. Session 1: one hint after the first prompt, none after the
+  second. Session 2: no hint for a keyword prompt with a directness marker.
+- **Clarify-first: partial pass.** Real model (valar, GLM-5.2), 3 vague prompts with `--print`.
+  In a clean project all three ended in clarifying questions with no plan.
+
+Findings from the clarify-first run, not yet fixed:
+1. **`questionnaire` does not exist.** The tool is not defined in this repo or the installed
+   extensions, yet the plan prompts and the Refine interview tell the model to use it. The model
+   fell back to plain-text questions. In `--print` there was no way to answer them.
+2. **Explore runs before Clarify.** The model read the code first on every prompt, despite the
+   numbered phases. Reasonable behaviour, but not what the prompt says.
+3. **A blocked command ends the turn.** In one run, a compound `for` loop hit the allowlist and
+   `terminate: true` stopped the session with no questions and exit 0.
 
 ## Post-phase fix — /dev/null sink carve-out (2026-10-22, owner-approved)
 

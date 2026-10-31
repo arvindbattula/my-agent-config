@@ -103,11 +103,28 @@ if (args.includes("--sandbox")) {
 		results.push({ id, label, pass, detail });
 		console.log(`${pass ? "PASS" : "FAIL"} ${id} ${label}${detail ? ` — ${detail}` : ""}`);
 	};
+	const skip = (id, label, why) => {
+		results.push({ id, label, skipped: true });
+		console.log(`SKIP ${id} ${label} — ${why}`);
+	};
+	// A denial only means something if the sandbox can run commands at all:
+	// when bwrap cannot start, every command fails and denial probes pass.
+	const notRun = (ids) => {
+		for (const [id, label] of ids) check(id, label, false, "not run: sandbox cannot execute commands");
+	};
 	async function probe(cmd, cwd = CWD) {
 		let out = "";
-		const res = await OPS.exec(cmd, cwd, { onData: (d) => (out += d.toString()) });
-		return { code: res.exitCode, out };
+		try {
+			const res = await OPS.exec(cmd, cwd, { onData: (d) => (out += d.toString()) });
+			return { code: res.exitCode, out };
+		} catch (e) {
+			return { code: null, out, threw: e instanceof Error ? e.message : String(e) };
+		}
 	}
+	const denied = (id, label, p, pass) => {
+		check(id, label, !p.threw && pass, p.threw ? `probe threw: ${p.threw}` : `exit=${p.code}`);
+	};
+	const readableUnsandboxed = (path) => spawnSync("bash", ["-c", `test -r ${path}`]).status === 0;
 	const fileExists = (p) => { try { statSync(p); return true; } catch { return false; } };
 	const rm = (p) => { try { rmSync(p, { force: true }); } catch {} };
 
@@ -115,35 +132,67 @@ if (args.includes("--sandbox")) {
 	const planOk = await ensureSandbox(planSandboxConfig([]), "plan");
 	check("S-00", "sandbox initializes (plan policy)", planOk);
 	if (planOk) {
-		await rm("/tmp/pm_t3_write");
-		const p1 = await probe("echo x > /tmp/pm_t3_write && echo WROTE");
-		check("S-01", "write denied", !p1.out.includes("WROTE") && !fileExists("/tmp/pm_t3_write"), `exit=${p1.code}`);
-
 		const p2 = await probe("cat package.json > /dev/null && echo READ_OK");
-		check("S-02", "read allowed", p2.out.includes("READ_OK"), `exit=${p2.code}`);
+		const live = !p2.threw && p2.out.includes("READ_OK");
+		check("S-02", "read allowed", live, p2.threw ? `probe threw: ${p2.threw}` : `exit=${p2.code}`);
 
-		const netControl = spawnSync("bash", ["-c", "curl -s -m 5 -o /dev/null -w '%{http_code}' https://example.com"], { encoding: "utf8" });
-		if (!netControl.stdout?.includes("200")) {
-			check("S-03", "network denied", true, "SKIPPED — no network even unsandboxed (offline machine)");
+		if (!live) {
+			notRun([
+				["S-01", "write denied"],
+				["S-03", "network denied"],
+				["S-04", "bypass: sh -c write fails at kernel"],
+				["S-05", "bypass: git --output write fails at kernel"],
+				["S-06", "bypass: sort -o write fails at kernel"],
+			]);
 		} else {
-			const p3 = await probe("curl -s -m 5 -o /dev/null -w '%{http_code}' https://example.com");
-			check("S-03", "network denied", !p3.out.includes("200"), `exit=${p3.code}, code=${p3.out.trim()}`);
+			await rm("/tmp/pm_t3_write");
+			const p1 = await probe("echo x > /tmp/pm_t3_write && echo WROTE");
+			denied("S-01", "write denied", p1, !p1.out.includes("WROTE") && !fileExists("/tmp/pm_t3_write"));
+
+			const netControl = spawnSync("bash", ["-c", "curl -s -m 5 -o /dev/null -w '%{http_code}' https://example.com"], { encoding: "utf8" });
+			if (!netControl.stdout?.includes("200")) {
+				skip("S-03", "network denied", "no network even unsandboxed (offline machine)");
+			} else {
+				const p3 = await probe("curl -s -m 5 -o /dev/null -w '%{http_code}' https://example.com");
+				denied("S-03", "network denied", p3, !p3.out.includes("200"));
+			}
+
+			// Bypass vectors — regex is deliberately NOT consulted here:
+			await rm("/tmp/pm_t3_bypass");
+			const p4 = await probe("sh -c 'echo pwned > /tmp/pm_t3_bypass'");
+			denied("S-04", "bypass: sh -c write fails at kernel", p4, !fileExists("/tmp/pm_t3_bypass"));
+
+			await rm("/tmp/pm_t3_gitout");
+			await rm("/tmp/pm_t3_sorted");
+			const tmpGit = "/tmp/pm_t3_repo";
+			const hasGit = spawnSync("git", ["--version"]).status === 0;
+			spawnSync("bash", ["-c", `rm -rf ${tmpGit} && mkdir -p ${tmpGit} && cd ${tmpGit} && echo a > f.txt`]);
+			if (hasGit) {
+				spawnSync("bash", ["-c", `cd ${tmpGit} && git init -q . && git add f.txt && git -c user.email=t@t -c user.name=t commit -qm x && echo b > f.txt`]);
+			}
+
+			// S-02 proved CWD only. These two run in a different directory.
+			const repoRead = await probe("cat f.txt > /dev/null && echo READ_OK", tmpGit);
+			const repoLive = !repoRead.threw && repoRead.out.includes("READ_OK");
+			if (!hasGit) {
+				skip("S-05", "bypass: git --output write fails at kernel", "git not installed");
+			} else {
+				const gitRead = await probe("git rev-parse HEAD > /dev/null && echo READ_OK", tmpGit);
+				if (repoLive && gitRead.out.includes("READ_OK")) {
+					const p5 = await probe("git diff --output=/tmp/pm_t3_gitout HEAD", tmpGit);
+					denied("S-05", "bypass: git --output write fails at kernel", p5, !fileExists("/tmp/pm_t3_gitout"));
+				} else {
+					notRun([["S-05", "bypass: git --output write fails at kernel"]]);
+				}
+			}
+
+			if (repoLive) {
+				const p6 = await probe("sort -o /tmp/pm_t3_sorted f.txt", tmpGit);
+				denied("S-06", "bypass: sort -o write fails at kernel", p6, !fileExists("/tmp/pm_t3_sorted"));
+			} else {
+				notRun([["S-06", "bypass: sort -o write fails at kernel"]]);
+			}
 		}
-
-		// Bypass vectors — regex is deliberately NOT consulted here:
-		await rm("/tmp/pm_t3_bypass");
-		await probe("sh -c 'echo pwned > /tmp/pm_t3_bypass'");
-		check("S-04", "bypass: sh -c write fails at kernel", !fileExists("/tmp/pm_t3_bypass"));
-
-		await rm("/tmp/pm_t3_gitout");
-		const tmpGit = "/tmp/pm_t3_repo";
-		spawnSync("bash", ["-c", `rm -rf ${tmpGit} && mkdir -p ${tmpGit} && cd ${tmpGit} && git init -q . && echo a > f.txt && git add f.txt && -c user.email=t@t -c user.name=t git commit -qm x && echo b >> f.txt && echo c >> f.txt`]);
-		spawnSync("bash", ["-c", `cd ${tmpGit} && git -c user.email=t@t -c user.name=t commit -qm x 2>/dev/null; echo b > f.txt`]);
-		const p5 = await probe("git diff --output=/tmp/pm_t3_gitout HEAD", tmpGit);
-		check("S-05", "bypass: git --output write fails at kernel", !fileExists("/tmp/pm_t3_gitout"), `exit=${p5.code}`);
-
-		const p6 = await probe("sort -o /tmp/pm_t3_sorted f.txt", tmpGit);
-		check("S-06", "bypass: sort -o write fails at kernel", !fileExists("/tmp/pm_t3_sorted"), `exit=${p6.code}`);
 	}
 
 	// ── airgap policy (policy switch exercises reset+reinit) ──
@@ -151,17 +200,34 @@ if (args.includes("--sandbox")) {
 	check("S-10", "sandbox policy switch to airgap", airgapOk);
 	if (airgapOk) {
 		const p7 = await probe("cat package.json > /dev/null && echo READ_OK");
-		check("S-11", "airgap: normal read allowed", p7.out.includes("READ_OK"), `exit=${p7.code}`);
-		const p8 = await probe("cat ~/.ssh/config");
-		check("S-12", "airgap: ~/.ssh read DENIED", !p8.out.includes("Host") && p8.code !== 0, `exit=${p8.code}`);
-		const p9 = await probe("cat ~/.aws/config");
-		check("S-13", "airgap: ~/.aws read DENIED", p9.code !== 0, `exit=${p9.code} (absent file also fails — deny is the point)`);
+		const airgapLive = !p7.threw && p7.out.includes("READ_OK");
+		check("S-11", "airgap: normal read allowed", airgapLive, p7.threw ? `probe threw: ${p7.threw}` : `exit=${p7.code}`);
+		if (!airgapLive) {
+			notRun([
+				["S-12", "airgap: ~/.ssh read DENIED"],
+				["S-13", "airgap: ~/.aws read DENIED"],
+			]);
+		} else {
+			if (readableUnsandboxed("~/.ssh/config")) {
+				const p8 = await probe("cat ~/.ssh/config");
+				denied("S-12", "airgap: ~/.ssh read DENIED", p8, p8.code !== 0);
+			} else {
+				skip("S-12", "airgap: ~/.ssh read DENIED", "~/.ssh/config absent, so a failed read proves nothing");
+			}
+			if (readableUnsandboxed("~/.aws/config")) {
+				const p9 = await probe("cat ~/.aws/config");
+				denied("S-13", "airgap: ~/.aws read DENIED", p9, p9.code !== 0);
+			} else {
+				skip("S-13", "airgap: ~/.aws read DENIED", "~/.aws/config absent, so a failed read proves nothing");
+			}
+		}
 	}
 
 	await teardownSandbox();
 	spawnSync("bash", ["-c", "rm -rf /tmp/pm_t3_repo /tmp/pm_t3_write /tmp/pm_t3_bypass /tmp/pm_t3_gitout /tmp/pm_t3_sorted"]);
-	const failed = results.filter((r) => !r.pass);
-	console.log(`\nSandbox tier: ${results.length - failed.length}/${results.length} passed.`);
+	const skipped = results.filter((r) => r.skipped).length;
+	const failed = results.filter((r) => !r.skipped && !r.pass);
+	console.log(`\nSandbox tier: ${results.length - skipped - failed.length} passed, ${skipped} skipped, ${failed.length} failed.`);
 	process.exit(failed.length > 0 ? 1 : 0);
 }
 

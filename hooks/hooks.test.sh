@@ -10,6 +10,9 @@
 
 set -uo pipefail
 
+# The suite often runs inside Claude Code, which exports this to child processes.
+unset CLAUDE_PROJECT_DIR
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -78,6 +81,32 @@ pp_from "/private/tmp/claude-$PP_UID/../escape.txt"; expect_exit "block traversa
 pp_from "$HOME/.claude/plans/x.md";          expect_exit "allow plan-mode file in ~/.claude/plans" 0
 pp_from "$HOME/.claude/projects/some-proj/memory/note.md"; expect_exit "allow auto-memory file" 0
 
+# cwd follows `cd` in Bash, so CLAUDE_PROJECT_DIR keeps the rest of the repo
+# writable after one. A path allowed only through it gets the stricter
+# any-depth .env/.git check: outside cwd, those paths were blocked before.
+PP_P="$TMP/proj-root"; mkdir -p "$PP_P/sub" "$PP_P/a" "$PP_P/b"
+pp_proj() { # <cwd> <file_path> [CLAUDE_PROJECT_DIR value]
+  printf '{"tool_input":{"file_path":%s},"cwd":%s}' "$(json "$2")" "$(json "$1")" \
+    | CLAUDE_PROJECT_DIR="${3-$PP_P}" bash "$SCRIPT_DIR/protect-paths.sh" >/dev/null 2>&1
+  RC=$?
+}
+pp_proj "$PP_P/sub" "$PP_P/README.md";     expect_exit "after cd: allow repo-root file" 0
+pp_proj "$PP_P/sub" "$PP_P/sub/x.txt";     expect_exit "after cd: allow file in cwd" 0
+pp_proj "$PP_P/a"   "$PP_P/b/x.txt";       expect_exit "after cd: allow sibling directory" 0
+pp_proj "$PP_P/sub" "$PP_P/.env";          expect_exit "after cd: block root .env" 2
+pp_proj "$PP_P/sub" "$PP_P/.env.local";    expect_exit "after cd: block root .env.local" 2
+pp_proj "$PP_P/sub" "$PP_P/.git/config";   expect_exit "after cd: block root .git" 2
+pp_proj "$PP_P/sub" "$PP_P/generated/x";   expect_exit "after cd: block root generated/" 2
+pp_proj "$PP_P/sub" "$PP_P/sub/.env";      expect_exit "after cd: block .env in cwd" 2
+pp_proj "$PP_P/a"   "$PP_P/b/.env";        expect_exit "after cd: block .env in sibling" 2
+pp_proj "$PP_P/a"   "$PP_P/b/.env.local";  expect_exit "after cd: block .env.local in sibling" 2
+pp_proj "$PP_P/a"   "$PP_P/b/.git/config"; expect_exit "after cd: block .git in sibling" 2
+pp_proj "$PP_P/sub" "/etc/hosts";          expect_exit "after cd: block outside path" 2
+pp_proj "$PP_P/sub" "$PP_P/../sibling/x";  expect_exit "after cd: block escape from project" 2
+pp_proj "$PP_P/sub" "$PP_P/README.md" "";            expect_exit "empty project dir: cwd is the only root" 2
+pp_proj "$PP_P/sub" "$PP_P/README.md" "proj-root";   expect_exit "relative project dir ignored" 2
+pp_proj "$PP_P/sub" "$PP_P/README.md" "$PP_P/nope";  expect_exit "missing project dir ignored" 2
+
 # Fail-closed tiers
 run_hook protect-paths.sh 'this is not json'
 expect_exit "fail closed on unparseable payload" 2
@@ -106,6 +135,19 @@ cp_run "rm -rf ../sibling";           expect_exit "block rm -rf ../sibling" 2
 cp_run "DROP TABLE users";            expect_exit "block DROP TABLE" 2
 cp_run "truncate table logs";         expect_exit "block TRUNCATE TABLE" 2
 cp_run "cat .env";                    expect_exit "block cat .env" 2
+cp_run "cat config/.env";             expect_exit "block cat config/.env" 2
+cp_run "cat ./.env.local";            expect_exit "block cat ./.env.local" 2
+cp_run "cat a.txt .env";              expect_exit "block .env as a later argument" 2
+cp_run "cat .env.example";            expect_exit "block cat .env.example" 2
+cp_run 'head -5 "$HOME/.env"';        expect_exit "block quoted home .env" 2
+cp_run "cat prod.env";                expect_exit "block cat prod.env" 2
+cp_run "cat a; cat .env";             expect_exit "block .env in a later command" 2
+cp_run "cat < .env";                  expect_exit "block cat from stdin redirect" 2
+cp_run "cat a 2>&1 .env";             expect_exit "block .env after 2>&1" 2
+cp_run "cat README.md | grep '\.env'"; expect_exit "allow .env in a later pipe stage" 0
+cp_run "tail -5 log.txt && echo .env"; expect_exit "allow .env after &&" 0
+cp_run "grep -n x f | head -3; grep .env other"; expect_exit "allow .env after ;" 0
+cp_run "$(printf 'cat README.md\necho .env')"; expect_exit "allow .env on the next line" 0
 cp_run "git push --force origin main";expect_exit "block force-push main" 2
 cp_run "git push -f origin master";   expect_exit "block -f push master" 2
 cp_run "rm -rf build/";               expect_exit "allow rm -rf build/" 0

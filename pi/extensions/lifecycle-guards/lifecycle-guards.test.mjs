@@ -141,6 +141,36 @@ test("checkCommand: head .env is blocked", () => {
 	assert.match(result.reason, /reading env/);
 });
 
+for (const command of [
+	"cat config/.env",
+	"cat ./.env.local",
+	"cat a.txt .env",
+	"cat .env.example",
+	'head -5 "$HOME/.env"',
+	"cat prod.env",
+	"cat a; cat .env",
+	"cat < .env",
+	"cat a 2>&1 .env",
+]) {
+	test(`checkCommand: ${command} is blocked`, () => {
+		const result = checkCommand(command);
+		assert.equal(result.blocked, true);
+		assert.match(result.reason, /reading env/);
+	});
+}
+
+// A read of another file must not match on .env later in the command.
+for (const command of [
+	"cat README.md | grep '\\.env'",
+	"tail -5 log.txt && echo .env",
+	"grep -n x f | head -3; grep .env other",
+	"cat README.md\necho .env",
+]) {
+	test(`checkCommand: ${JSON.stringify(command)} is allowed`, () => {
+		assert.equal(checkCommand(command).blocked, false);
+	});
+}
+
 test("checkCommand: git push --force main is blocked", () => {
 	const result = checkCommand("git push --force origin main");
 	assert.equal(result.blocked, true);

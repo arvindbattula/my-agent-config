@@ -776,7 +776,9 @@ sync_pi() {
         name="$(basename "$d")"
         link="$AGENTS_SKILLS/$name"
         want="$REPO_DIR/skills/$name"
-        if [ -L "$link" ] && [ "$(readlink "$link")" = "$want" ]; then
+        # -ef compares the directories themselves: on macOS the same repo can be
+        # reached as Documents/Analytics or Documents/analytics.
+        if [ -L "$link" ] && [ "$link" -ef "$want" ]; then
             echo -e "  ${GREEN}✓${NC} $name ${GRAY}(symlink)${NC}"
         elif $STATUS_ONLY; then
             echo -e "  ${YELLOW}!${NC} $name ${GRAY}(not symlinked — will link on sync)${NC}"

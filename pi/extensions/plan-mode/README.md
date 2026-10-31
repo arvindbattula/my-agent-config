@@ -73,7 +73,7 @@ sudo pacman -S bubblewrap socat ripgrep         # Arch
 - **WSL1 is unsupported** (bubblewrap does not run there); use WSL2.
 - **Docker:** the default container profile stops bubblewrap creating namespaces, and unconfined seccomp/AppArmor is not enough. It works in a `--privileged` container, which gives up much of the container's own isolation.
 - **Blocked namespaces look different from missing binaries:** the sandbox still reports ready, then every bash command fails with a `bwrap:` error, including in plan mode (no allowlist fallback). Nothing runs unsandboxed.
-- Confirm with `node tests/run.mjs --sandbox` from this directory. Require S-02 (read allowed) to pass: if bubblewrap cannot start, the denial probes pass without proving anything.
+- Confirm with `node tests/run.mjs --sandbox` from this directory. If bubblewrap cannot start, the denial probes report FAIL as "not run". Probes that can't prove anything on this machine, such as reading a `~/.aws/config` that doesn't exist, report SKIP.
 
 ### Plan Mode (Read-Only)
 - Built-in `edit`/`write` disabled; other active tools (read, bash, grep, find, ls, questionnaire, memory tools) remain available
