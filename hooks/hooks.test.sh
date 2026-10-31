@@ -167,6 +167,25 @@ cp_run "rm -rf ./dist";               expect_exit "allow rm -rf ./dist" 0
 cp_run "cat README.md";               expect_exit "allow cat README.md" 0
 cp_run "git push origin feature";     expect_exit "allow push to feature" 0
 
+# ── compress-memory.sh ────────────────────────────────────────────────────
+echo "compress-memory.sh"
+CM_DIR="$TMP/memory"; mkdir -p "$CM_DIR"
+compress() { # <prose>  -> prints the compressed line
+  printf '%s\n' "$1" > "$CM_DIR/note.md"
+  run_hook compress-memory.sh "$(printf '{"tool_input":{"file_path":%s}}' "$(json "$CM_DIR/note.md")")"
+  cat "$CM_DIR/note.md"
+}
+expect_text() { # <label> <expected> <actual>
+  [ "$3" = "$2" ] && pass "$1" || fail "$1 (got '$3')"
+}
+# Paths in prose must survive exactly; the spec is "preserves file paths".
+expect_text "keeps the space before ./ paths" "then run ./install.sh --force" "$(compress "then run ./install.sh --force")"
+expect_text "keeps the space before ../ paths" "see ../shared/config.md for this" "$(compress "see ../shared/config.md for this")"
+expect_text "keeps ~/ paths" "edit ~/.claude/settings.json now" "$(compress "edit ~/.claude/settings.json now")"
+expect_text "keeps absolute paths" "open /etc/hosts first" "$(compress "open /etc/hosts first")"
+expect_text "still removes filler words" "this works" "$(compress "this really works")"
+expect_text "still strips a stray space before punctuation" "this works, then stops." "$(compress "this works , then stops .")"
+
 # ── design-antipattern-check.sh + stop-gate.sh ────────────────────────────
 echo "design-antipattern-check.sh + stop-gate.sh"
 PROJ="$TMP/proj"; mkdir -p "$PROJ"

@@ -283,6 +283,17 @@ test("compressFileContent: replaces verbose phrases", () => {
 	assert.match(compressed, /^to test/);
 });
 
+// Paths in prose must survive exactly; the spec is "preserves file paths".
+for (const line of ["then run ./install.sh --force", "see ../shared/config.md for this", "edit ~/.claude/settings.json now", "open /etc/hosts first"]) {
+	test(`compressFileContent: keeps the path in "${line}"`, () => {
+		assert.equal(compressFileContent(line), line);
+	});
+}
+
+test("compressFileContent: still strips a stray space before punctuation", () => {
+	assert.equal(compressFileContent("this works , then stops ."), "this works, then stops.");
+});
+
 test("compressFileContent: preserves code blocks", () => {
 	const input = "Some text.\n\n```js\nconst x = just a test;\n```\n\nMore text.";
 	const compressed = compressFileContent(input);

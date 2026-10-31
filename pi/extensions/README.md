@@ -55,14 +55,14 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | Finishing with failing files | Blocks once, then lets the retry finish | Queues up to 3 follow-ups, re-armed when the failing set changes |
 | `.hook-state/` and `reports/` location | Project root | `ctx.cwd` |
 
-**Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (79 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (116 assertions across six hooks, including command-policy parity, per-file gate tracking, cross-session staleness, and the project root after `cd`).
+**Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (84 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (122 assertions across seven hooks, including command-policy parity, per-file gate tracking, cross-session staleness, and the project root after `cd`).
 
 ### Test files
 
 | File | Checks | What it guards |
 |---|---|---|
 | `azure-stream-result.test.mjs` | 23 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff; stop-reason mapping; pending fallback for partial streams |
-| `lifecycle-guards/lifecycle-guards.test.mjs` | 79 | Pure-logic unit tests for all guard rules |
+| `lifecycle-guards/lifecycle-guards.test.mjs` | 84 | Pure-logic unit tests for all guard rules |
 | `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
 | `session-stats.test.mjs` | — | `computeSessionTotals` cost/token totals parity with pi's `getUsageCostBreakdown`; `formatTokens`/`sanitizeStatusText` |
