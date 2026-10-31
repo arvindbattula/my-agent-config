@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PreToolUse hook: block edits/writes to protected paths before they happen.
 # Protected: .env files, .git/ directory contents, generated/ prefix,
-# and any path resolving outside the project root (cwd) — except the Claude
+# and any path outside the project (cwd or CLAUDE_PROJECT_DIR) — except the Claude
 # session scratchpad (<temp>/claude[-<uid>]/), plan files (~/.claude/plans/), and
 # auto-memory (~/.claude/projects/*/memory/), which Claude Code directs
 # sessions to write and which live outside the project by design.
@@ -130,21 +130,50 @@ outside_root_exempt() {
   return 1
 }
 
+# cwd follows `cd` in Bash, so it can be a subdirectory of the project.
+# CLAUDE_PROJECT_DIR stays where the session started. Only an absolute value is
+# used: a relative one would resolve against this hook's own working directory.
+PROJECT_ABS=""
+case "${CLAUDE_PROJECT_DIR:-}" in
+  /*|[A-Za-z]:*) PROJECT_ABS=$(cd "$CLAUDE_PROJECT_DIR" 2>/dev/null && pwd 2>/dev/null) ;;
+esac
+
 # --- Check 1: path outside project root ---
 # Use string prefix check (both normalized to absolute)
+ROOT="$CWD_ABS"
 case "$NORMALIZED" in
   "$CWD_ABS"|"$CWD_ABS"/*)
     # Inside the project root — OK
     ;;
   *)
-    outside_root_exempt && exit 0
-    echo "BLOCKED: $FILE_PATH resolves outside the project root ($CWD_ABS). Use files within the repo." >&2
-    exit 2
+    case "$NORMALIZED" in
+      "${PROJECT_ABS:-/nonexistent-project-root}"/*)
+        # Allowed only through the session's project, so .env and .git are
+        # refused at any depth. Outside cwd they were blocked before this root
+        # existed, and the root-relative checks below would miss b/.env.
+        case "/${NORMALIZED#"$PROJECT_ABS"/}/" in
+          */.env/*|*/.env.*/*)
+            echo "BLOCKED: $NORMALIZED is a secrets file. Do not edit .env files directly." >&2
+            exit 2
+            ;;
+          */.git/*)
+            echo "BLOCKED: $NORMALIZED is inside .git/. Use application code or tests instead." >&2
+            exit 2
+            ;;
+        esac
+        ROOT="$PROJECT_ABS"
+        ;;
+      *)
+        outside_root_exempt && exit 0
+        echo "BLOCKED: $FILE_PATH resolves outside the project root (${PROJECT_ABS:-$CWD_ABS}). Use files within the repo." >&2
+        exit 2
+        ;;
+    esac
     ;;
 esac
 
 # Relative path from project root for pattern matching
-REL="${NORMALIZED#"$CWD_ABS"/}"
+REL="${NORMALIZED#"$ROOT"/}"
 
 # --- Check 2: .env files ---
 case "$REL" in
