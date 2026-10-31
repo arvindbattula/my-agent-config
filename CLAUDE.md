@@ -16,7 +16,9 @@ Personal Claude Code configuration — skills, commands, rules, and settings, sy
 - `skills/` — Auto-triggered by Claude when relevant (18 skills)
 - `commands/` — User-invoked via `/` in Claude Code (18 commands)
 - `rules/` — Always-on behavioral guidelines (21 rules)
-- `hooks/` — Session lifecycle hooks (session-start, compress-memory, design-antipattern-check, design-antipattern-prevent, protect-paths, command-policy, stop-gate, session-end)
+- `hooks/` — Session lifecycle hooks (session-start, compress-memory, design-antipattern-check, design-antipattern-prevent, protect-paths, command-policy, stop-gate, session-end), plus `design-checks-lib.sh` (shared checks) and `hooks.test.sh` (tests)
+- `bin/` — Helper scripts (e.g. `recall`)
+- `pi/` — Pi coding agent config: `extensions/`, `models.json`, `settings.json`
 - `settings.json` — Permissions, plugins, preferences
 - `statusline.sh` — Terminal status bar (context usage, git info)
 
@@ -40,3 +42,5 @@ The engineering workflow (`/idea-refine` → `/scaffold` → `/discover` → `/b
 
 After making changes:
 - `./install.sh --status` — Check sync status between repo and local
+- `bash hooks/hooks.test.sh` — Hook tests
+- `pi/extensions/README.md` lists the Pi test files; plan-mode's are in `pi/extensions/plan-mode/tests/`

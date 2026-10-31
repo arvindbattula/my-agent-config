@@ -112,12 +112,12 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 |------|---------|---------|
 | `session-start.sh` | SessionStart | Brief workflow reminder injected at session start |
 | `compress-memory.sh` | PostToolUse → Write | Auto-compress prose in memory files (filler removal, phrase shortening). Preserves frontmatter, code, URLs, paths. Validates before writing, restores on corruption. |
-| `design-antipattern-check.sh` | PostToolUse → Edit/Write | Detects AI design anti-patterns (Inter font, purple gradients, side-stripe borders, gradient text, #000/#fff, HSL) in frontend files and warns inline |
+| `design-antipattern-check.sh` | PostToolUse → Edit/Write | Detects AI design anti-patterns (Inter font, purple gradients, side-stripe borders, gradient text, #000/#fff, HSL) in frontend files and warns inline. Records failures in `.hook-state/last_design_gate.json` at the project root for `stop-gate.sh` |
 | `design-antipattern-prevent.sh` | PreToolUse → Edit/Write | Blocks design anti-patterns in frontend files before they reach disk; the post-write check and stop gate remain as a backstop |
-| `protect-paths.sh` | PreToolUse → Edit/Write | Blocks edits to `.env` files, `.git/`, `generated/`, and paths outside the project (except the Claude scratchpad, plan files, and auto-memory). Fails closed if `jq` is missing or the payload is unreadable. |
-| `command-policy.sh` | PreToolUse → Bash | Conservative denylist: blocks `rm -rf` on root/home/cwd/parent, `DROP`/`TRUNCATE TABLE`, reading `.env` files, and force-pushes to `main`/`master`; scoped `rm -rf` and force-pushes to feature branches stay allowed |
-| `stop-gate.sh` | Stop | Blocks completion while the current session's design gate still lists failing files; gates from earlier sessions are ignored |
-| `session-end.sh` | SessionEnd | Appends a JSONL audit record to `reports/session-audit.log`; always exits 0 |
+| `protect-paths.sh` | PreToolUse → Edit/Write | Blocks edits to `.env`, `.env.*`, `.git/` and `generated/` at the project root, and paths outside the project (except the Claude scratchpad, plan files, and auto-memory). The project is `cwd`, plus `CLAUDE_PROJECT_DIR` when it's an absolute path, so a Bash `cd` doesn't lock you out of the repo. Paths allowed only through `CLAUDE_PROJECT_DIR` refuse `.env`, `.env.*` and `.git` at any depth; inside `cwd`, nested ones like `sub/.env` are allowed. Fails closed if `jq` is missing or the payload is unreadable. |
+| `command-policy.sh` | PreToolUse → Bash | Conservative denylist: blocks `rm -rf` on root/home/cwd/parent, `DROP`/`TRUNCATE TABLE`, reading `.env` files with `cat`, `less`, `more`, `tail` or `head` (within one command; `grep`, `sed` and others aren't covered), and force-pushes to `main`/`master`; scoped `rm -rf` and force-pushes to feature branches stay allowed |
+| `stop-gate.sh` | Stop | Blocks completion once while the current session's design gate still lists failing files, then lets the retry finish to avoid a loop. Uses the same project root as `design-antipattern-check.sh`; gates from earlier sessions are ignored |
+| `session-end.sh` | SessionEnd | Appends a JSONL audit record to `reports/session-audit.log` under the current working directory; always exits 0 |
 
 `design-checks-lib.sh` holds the checks shared by both design hooks. `hooks.test.sh` is the test suite.
 
@@ -142,9 +142,11 @@ All overwrites create timestamped backups in `~/.claude/backups/`.
 
 Beyond `~/.claude/`, `install.sh` also syncs Pi coding agent resources when present:
 - **Pi skills** (`~/.agents/skills`) — repo skills are symlinked; `/`-commands are generated into `source-command-*` skills.
-- **Pi extensions** (`~/.pi/agent/extensions`) — repo `pi/extensions/*.ts` are copied there (auto-discovered by the Pi CLI). Personal extensions not in the repo (e.g. `azure-foundry.ts`) show as `+ local only` and are never pulled in automatically.
+- **Pi extensions** (`~/.pi/agent/extensions`) — all repo `pi/extensions/` files are copied there recursively (auto-discovered by the Pi CLI). Personal extensions not in the repo (e.g. `valar-strip-reasoning.ts`) show as `+ local only` and are never pulled in automatically.
+- **Pi extension dependencies** — `npm ci` installs plan-mode's sandbox runtime.
+- **Pi config** (`~/.pi/agent`) — `pi/models.json` and `pi/settings.json` are synced. `--force` overwrites the live files, so set the default model in the repo.
 
-Both sections only run if the corresponding Pi directory already exists.
+The skills step only runs if `~/.agents` exists; the other Pi steps only run if `~/.pi/agent` exists.
 
 > **Note:** A running Claude Code session manages `~/.claude/settings.json` in memory and may overwrite external changes. If `settings.json` shows as "differs" after sync, exit all Claude Code sessions first, then run `./install.sh` again.
 

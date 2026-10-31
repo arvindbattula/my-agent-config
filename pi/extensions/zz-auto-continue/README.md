@@ -43,8 +43,10 @@ zz-auto-continue/ ← loads second, handles everything else
 ```
 
 In plan-mode **execution** sessions: `plan-mode` queues a plan-specific resume
-message first. `zz-auto-continue` sees `ctx.hasPendingMessages() === true` and
-skips. No double-queuing.
+message first. `zz-auto-continue` queues a continuation too, because
+`hasPendingMessages()` doesn't detect plan-mode's custom message. This
+double-queue is harmless: both messages are "continue" variants, and both
+extensions have circuit breakers.
 
 In plan-mode **planning** sessions (not executing): `plan-mode` persists state
 but does NOT queue a resume message. `zz-auto-continue` handles the
@@ -65,14 +67,13 @@ warning notification and must continue manually.
 
 - **Error-based overflow** (`reason="overflow", willRetry=true`): Pi already
   auto-retries. The extension skips to avoid a double-continue.
-- **Plan-mode execution sessions**: `plan-mode` already queues a plan-specific
-  resume message. `hasPendingMessages()` is true → this extension skips. (In
-  plan-mode *planning* sessions, plan-mode does NOT queue a resume, so this
-  extension handles it — same as non-plan-mode.)
+- **Pending user messages**: if another extension queued one with
+  `pi.sendUserMessage()`, `hasPendingMessages()` is true and this extension
+  skips.
 
 ## Settings
 
 No settings changes. `reserveTokens`, `keepRecentTokens`, and `retry.enabled`
 are left at their current defaults. This extension is the safety net for
-overflow that escapes threshold compaction (e.g. silent overflow on z.ai /
-GLM-5.2).
+overflow that escapes threshold compaction (e.g. silent overflow seen on
+z.ai / GLM-5.2; not yet checked on GLM-5.3).

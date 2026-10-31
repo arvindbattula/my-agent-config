@@ -3,7 +3,8 @@
  *
  * Ported from the Claude Code bash hooks (protect-paths.sh, command-policy.sh,
  * design-antipattern-check.sh, compress-memory.sh) to TypeScript so the same
- * deterministic rules run in Pi via extension event handlers.
+ * deterministic rules run in Pi via extension event handlers. Path rules are
+ * narrower than protect-paths.sh; pi/extensions/README.md lists the differences.
  *
  * Extracted as pure functions for unit testing — see lifecycle-guards.test.mjs.
  */

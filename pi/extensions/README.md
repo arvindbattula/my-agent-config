@@ -29,10 +29,10 @@ Auth uses Entra ID via `az cli`.
 Model specs (`MODEL_SPECS`) are sourced from pi-ai's bundled `anthropic.json` catalog — context window, max tokens, reasoning flag, cost, `thinkingLevelMap`, and adaptive-thinking mode all match the catalog entry for each model. A regression test (`azure-model-specs.test.mjs`) asserts field-by-field parity to prevent drift. Unknown Claude deployments emit a console warning instead of silently degrading to defaults.
 
 ### `lifecycle-guards/`
-Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extension event system. Provides the same deterministic rules in both runtimes:
+Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extension event system. Provides the same rules in both runtimes, apart from the differences listed under **Claude Code and Pi differences** below:
 
 - **Session context** (`before_agent_start`) — injects workflow reminder at session start.
-- **Protected paths** (`tool_call: write/edit`) — blocks edits to `.env`, `.git/`, `generated/`, and paths outside the project root.
+- **Protected paths** (`tool_call: write/edit`) — blocks edits to `.env`, `.env.*`, `.git/` and `generated/` at the project root, and paths outside the project root.
 - **Command policy** (`tool_call: bash`) — blocks destructive shell commands (`rm -rf /`, `DROP TABLE`, `cat .env`, force-push to main/master).
 - **Memory compression** (`tool_result: write`) — compresses prose in `memory/*.md` files (removes filler words, replaces verbose phrases, preserves code/URLs/headings/frontmatter).
 - **Design antipattern check** (`tool_result: write/edit`) — detects AI-tell patterns in frontend files (pure black/white, HSL, purple gradients, Inter/Roboto fonts, side-stripe borders, gradient text). Tracks each failing file independently (fixing one file never masks another) and mirrors state to `.hook-state/last_design_gate.json` for observability.
@@ -45,21 +45,39 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 
 **Interaction with plan-mode:** Both extensions listen to `tool_call`. Plan-mode returns early when not in plan mode. When plan mode is active, both handlers run — if either blocks, the tool is blocked. The command policy here is a subset of plan-mode's restrictions, so plan-mode's stricter checks block first.
 
-**Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (56 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (35 assertions across all five hooks, including command-policy parity, per-file gate tracking, and cross-session staleness).
+**Claude Code and Pi differences:**
+
+| Area | Claude Code hooks | Pi lifecycle-guards |
+|---|---|---|
+| Project root | `cwd` plus `CLAUDE_PROJECT_DIR`, because a Bash `cd` moves `cwd` | `ctx.cwd` only, because Pi's `cd` doesn't persist between commands |
+| Nested `.env` and `.git` | Refused at any depth for paths allowed only through `CLAUDE_PROJECT_DIR`; allowed inside `cwd` | Allowed; only root-level paths are checked |
+| Paths outside the project | Allows the session scratchpad, plan files and auto-memory | No exemptions |
+| Design anti-patterns | Blocks before writing, and checks after | Checks after writing only |
+| Finishing with failing files | Blocks once, then lets the retry finish | Queues up to 3 follow-ups, re-armed when the failing set changes |
+| `.hook-state/` location | Project root | `ctx.cwd` |
+
+**Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (69 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (102 assertions across six hooks, including command-policy parity, per-file gate tracking, cross-session staleness, and the project root after `cd`).
 
 ### Test files
 
 | File | Checks | What it guards |
 |---|---|---|
 | `azure-stream-result.test.mjs` | 23 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff; stop-reason mapping; pending fallback for partial streams |
-| `lifecycle-guards/lifecycle-guards.test.mjs` | 56 | Pure-logic unit tests for all guard rules |
+| `lifecycle-guards/lifecycle-guards.test.mjs` | 69 | Pure-logic unit tests for all guard rules |
 | `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
 | `session-stats.test.mjs` | — | `computeSessionTotals` cost/token totals parity with pi's `getUsageCostBreakdown`; `formatTokens`/`sanitizeStatusText` |
 | `statusline.test.mjs` | 5 | `render()` does not crash when ExtensionAPI lacks `getSettings()` (feynman's bundled pi 0.84.x); ` (auto)` marker honors `compaction.enabled` when present. Uses `statusline-test-hook.mjs` to alias `@earendil-works/pi-tui` |
+| `plan-mode/tests/run.mjs` | — | Red-team corpus gate for the bash allowlist. `--sandbox` runs the kernel probes |
+| `plan-mode/tests/phase3.mjs` | — | Verified step completion: check extraction, hashing and config |
+| `plan-mode/tests/phase4.mjs` | — | Trigger-assist hit and abstain cases |
+| `plan-mode/tests/sandbox-init-failure.mjs` | — | Sandbox startup failures name the packages to install |
 
 ### `plan-mode/`
-Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details.
+Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details. Depends on `@anthropic-ai/sandbox-runtime`, which `install.sh` installs with `npm ci`. Linux also needs the prerequisites in that README for the kernel sandbox.
+
+### `questionnaire.ts`
+The tool plan mode uses to ask you structured questions: clarifying, Refine's interview and paused steps. Copied from Pi 1.4.0's `examples/extensions/questionnaire.ts`, because Pi doesn't register it by default. Compare it with the example after a Pi update. Outside the terminal UI (`--print`) it returns an error, so the model has to ask in plain text.
 
 ### `zz-auto-continue/`
 Queues a continuation message after non-retrying compaction so the agent keeps going without manual "continue." Circuit breaker: max 5 auto-continues per user-initiated run.
@@ -96,6 +114,8 @@ export AZURE_FOUNDRY_OPENAI_MODEL_KIMI_ID="your-kimi-deployment-id"
 # 3. Log in to Azure CLI
 az login
 ```
+
+On Linux, also install the kernel sandbox prerequisites in `plan-mode/README.md`, or airgap mode blocks all bash.
 
 ## Design Notes
 
@@ -158,7 +178,7 @@ The pi 1.4.0 update migrated pi from an npm global install to the managed instal
 
 `settings.json` sets `"retry": {"enabled": false}` globally — correct for the Azure providers, which retry in-extension via `lib/transient-retry.ts` so failed attempts stay out of the chat UI. But `pi/models.json` also defines a `valar` provider with no in-extension retry, so it gets zero retry on anything. All of pi's recent retry improvements (OpenAI Responses early-stream, DNS failures, summarization retry) are switched off for it.
 
-**Decision:** accept the tradeoff. Re-enabling pi's retry globally would stack retries on the Azure providers (which already retry in-extension), producing duplicate attempts and multiple error lines in the TUI. Stripping the in-extension loops to migrate to pi's retry would lose the clean single-error UI. If Valar becomes a daily-use provider, revisit.
+**Decision:** accept the tradeoff. Re-enabling pi's retry globally would stack retries on the Azure providers (which already retry in-extension), producing duplicate attempts and multiple error lines in the TUI. Stripping the in-extension loops to migrate to pi's retry would lose the clean single-error UI. Valar is now the default provider, so this tradeoff is due for review: it still has no retry coverage.
 
 ### azure-openai-models.ts does not inherit tool-call-ID hardening
 
@@ -170,4 +190,4 @@ Pi 0.83+ added inherited per-request fetch injection for supported text and imag
 
 ### Repo/live settings drift
 
-`pi/settings.json` and `~/.pi/agent/settings.json` differ on `lastChangelogVersion`, `defaultProvider`, and `defaultModel`. This is expected — the live file tracks current usage. `install.sh` syncs `settings.json` to `~/.pi/agent/settings.json`, so a fresh `--force` install will revert the live defaults. Reconcile `pi/settings.json` if the repo should reflect current usage.
+`install.sh` syncs `pi/settings.json` to `~/.pi/agent/settings.json`, and `--force` overwrites any live changes, so change the default provider or model in the repo. Without `--force`, a difference gets the usual interactive choice.

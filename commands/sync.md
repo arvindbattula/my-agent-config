@@ -1,9 +1,9 @@
 ---
 name: sync
-description: Run install.sh to sync repo and ~/.claude/
+description: Run install.sh to sync repo with ~/.claude/ and Pi config
 ---
 
-Run the install.sh script from the my-agent-config repo to compare the repo and ~/.claude/ directory.
+Run the install.sh script from the my-agent-config repo to compare the repo with ~/.claude/ and, when Pi is installed, its skills, extensions and config.
 
 1. First, find the my-agent-config repo. Check these locations in order:
    - Look for a directory containing `install.sh` and a `skills/` directory in common locations: `~/Documents/Analytics/git/my-agent-config`, `~/Developer/my-agent-config`, `~/my-agent-config`
@@ -22,7 +22,7 @@ Run the install.sh script from the my-agent-config repo to compare the repo and 
    - Show the diff first
    - Skip
 
-5. Execute the user's decisions by running the appropriate install.sh commands or file copies
+5. Execute the user's decisions by running the appropriate install.sh commands. Prefer install.sh over file copies, because it also installs Pi extension dependencies
 
 6. If the user wants to commit and push changes to the repo, help with that too
 
