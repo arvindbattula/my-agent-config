@@ -6,7 +6,7 @@
   ],
   "lastChangelogVersion": "1.4.0",
   "defaultProvider": "valar",
-  "defaultModel": "zai-org/GLM-5.2",
+  "defaultModel": "zai-org/GLM-5.3",
   "hideThinkingBlock": false,
   "defaultThinkingLevel": "high",
   "retry": {
