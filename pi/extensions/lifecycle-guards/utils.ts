@@ -278,7 +278,7 @@ const PHRASE_REPLACEMENTS: Array<[RegExp, string]> = [
 ];
 
 /** Regex matching spans that must not be compressed (code, URLs, file paths). */
-const PROTECTED_SPAN = /(`[^`]+`|```[\s\S]*?```|https?:\/\/\S+|\b\w+:\/\/\S+|(?:~\/|\/[\w])[\w/.\-@:]+)/;
+const PROTECTED_SPAN = /(`[^`]+`|```[\s\S]*?```|https?:\/\/\S+|\b\w+:\/\/\S+|(?:~\/|\.\.?\/|\/[\w])[\w/.\-@:]+)/;
 
 /**
  * Compress prose in a markdown file's content.

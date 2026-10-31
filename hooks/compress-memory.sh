@@ -83,7 +83,7 @@ PROTECTED_SPAN = re.compile(
     r'|```[\s\S]*?```'             # fenced code blocks (shouldn't appear mid-line, but safe)
     r'|https?://\S+'              # URLs
     r'|\b\w+://\S+'              # other protocol URLs
-    r'|(?:~/|/[\w])[\w/.\-@:]+)' # file paths
+    r'|(?:~/|\.\.?/|/[\w])[\w/.\-@:]+)' # file paths
 )
 
 
