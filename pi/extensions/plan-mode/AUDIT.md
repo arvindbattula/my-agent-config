@@ -141,7 +141,8 @@ any current-plan DONE tags before it are already captured in the persisted
 `plan-mode` entry's `completed` flags, so the tighter scan window loses nothing.
 
 ## Known limitation (unchanged)
-This is a **regex guardrail, not a sandbox.** A determined model can still
+This describes the regex layer, and plan mode if the kernel sandbox added in Phase 2 fails to
+initialize. The regex layer is a **guardrail, not a sandbox.** A determined model can still
 construct evasions (e.g. obfuscated string concatenation inside an allowed
 interpreter). For a genuine read-only guarantee on sensitive repos, run pi in a
 container — see `docs/containerization.md` / `examples/extensions/sandbox`.
@@ -594,7 +595,8 @@ filter strips on those substrings). `tsc --noEmit --strict` clean; corpus gate 1
 **Live-session test for the owner (the Phase 1b gate):** start a fresh pi session, run `/plan`,
 and give it a multi-file task (e.g. "add a retry wrapper around the fetch calls in this repo").
 Check: (a) it asks clarifying questions FIRST via questionnaire, (b) steps name files,
-(c) a Risks section appears, (d) it flags its least-confident step. Rollback: revert the two
+(c) a Risks section appears, (d) it flags its least-confident step. Status (2026-10-30): (a)
+partly proven, see Live gate results; (b), (c) and (d) still open. Rollback: revert the two
 prompt blocks (diff hunks above).
 
 ## Phase 2 — kernel enforcement via @anthropic-ai/sandbox-runtime (2026-10-22)
@@ -653,7 +655,7 @@ our posture → effectively full write-deny, including /tmp.
 ### Rollback
 1. `pi --no-plan-sandbox` — runtime kill switch (regex layer remains).
 2. Full: revert `index.ts` from `tests/pre-phase2/`, delete `sandbox.ts` + `package.json` +
-   `node_modules/`, re-run `node tests/run.mjs` (regex gate must stay 117/117).
+   `node_modules/`, re-run `node tests/run.mjs` (regex gate must stay green; it is 127/127 since the `/dev/null` carve-out).
 
 ## Phase 3 — verified step completion (2026-10-22)
 
@@ -703,7 +705,7 @@ PASS (14 checks), corpus 117/117, sandbox tier 11/11, tsc strict clean; diff vs.
 ### Not automated (honest scope note)
 The full `plan_step_done` gating loop can't run headless (the Execute flow needs interactive
 UI). Unit tests cover extraction/hash/config; `runCheck`'s spawn pattern is the same as the
-Phase 2 ops (proven live). Manual live gate for the owner: run `/plan` on a real task with at
+Phase 2 ops (proven live). Done 2026-10-30, see Live gate results. Manual live gate for the owner: run `/plan` on a real task with at
 least two steps, one carrying a check that starts out failing, e.g. `[Verify: test -f done.flag]`.
 Try `plan_step_done` → expect refusal + attempt counter; create the flag and retry → passes →
 `✓✓` in widget. Changing the check itself can't work: Refine exists only before Execute, and
@@ -746,7 +748,7 @@ human). 4 hunks vs. `tests/pre-phase4/` (import, handler block, prompt line; 1 u
 
 Verified: `tests/phase4.mjs` 12/12 (hit/abstain matrix incl. dedup and directness markers);
 full battery green (corpus 117/117, sandbox 11/11, phase3 ALL PASS, tsc strict clean).
-Manual no-spam check for the owner: in a fresh session, send a refactor-shaped prompt of 40+
+Done 2026-10-30, see Live gate results. Manual no-spam check for the owner: in a fresh session, send a refactor-shaped prompt of 40+
 characters → one hint; send another → silence. In a second fresh session, send a 40+ character
 prompt with a keyword and a directness marker → no hint. A later "just fix X quickly" in the
 first session proves nothing: the latch silences everything, and it is under the 40-char minimum.
@@ -765,14 +767,28 @@ the pre-phase files); `shouldSuggestPlan` in utils.ts is inert without the handl
 - **Clarify-first: partial pass.** Real model (valar, GLM-5.2), 3 vague prompts with `--print`.
   In a clean project all three ended in clarifying questions with no plan.
 
-Findings from the clarify-first run, not yet fixed:
-1. **`questionnaire` does not exist.** The tool is not defined in this repo or the installed
-   extensions, yet the plan prompts and the Refine interview tell the model to use it. The model
+Findings from the clarify-first run. Number 1 is fixed (see the follow-up below); 2 and 3 are open:
+1. **`questionnaire` did not exist.** The tool was not defined in this repo or the installed
+   extensions, yet the plan prompts and the Refine interview told the model to use it. The model
    fell back to plain-text questions. In `--print` there was no way to answer them.
 2. **Explore runs before Clarify.** The model read the code first on every prompt, despite the
    numbered phases. Reasonable behaviour, but not what the prompt says.
 3. **A blocked command ends the turn.** In one run, a compound `for` loop hit the allowlist and
    `terminate: true` stopped the session with no questions and exit 0.
+
+Follow-up changes (2026-10-30):
+- **`questionnaire` added** as `pi/extensions/questionnaire.ts`, from Pi 1.4.0's example. With a
+  scripted model: the UI appears, the answer reaches the model, cancelling keeps the session
+  working, `--print` returns an error instead of hanging, the tool is available in plan and airgap
+  modes, and Refine's interview opens it. A real GLM-5.3 session given "add caching" opened a
+  5-question form before any plan. It also opens under Feynman (Pi 0.84.2). After 8 failed checks
+  a step reports PAUSED and points to the tool; a real model following that is untested.
+- **Sandbox probes can no longer pass without running.** `run.mjs --sandbox` checks liveness first,
+  uses positive controls for repo probes, reports SKIP when a probe has nothing to prove, and
+  reports FAIL as "not run" when it can't run.
+- **Linux setup.** `describeSandboxInitFailure` names the packages to install, covered by
+  `tests/sandbox-init-failure.mjs`. The README lists the prerequisites. Docker with `--privileged`
+  passes 11/11; Fedora, Arch, Ubuntu and non-Docker Linux are untested.
 
 ## Post-phase fix — /dev/null sink carve-out (2026-10-22, owner-approved)
 
@@ -885,5 +901,5 @@ with a scoped tool set. The pattern that scales multi-part analyses
 - **Effort:** real engineering; adds a dependency (e.g. `pi-subagents`).
   Re-evaluate the third-party trust surface at that point (PE / sensitive data).
 
-If either gets built, document it above under a Feature-addition heading and
+If it gets built, document it above under a Feature-addition heading and
 remove it from this list.

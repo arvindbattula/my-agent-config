@@ -572,7 +572,7 @@ fi
 
 # ─── Pi extensions (~/.pi/agent/extensions) ───
 # The Pi coding agent CLI auto-discovers extensions from ~/.pi/agent/extensions.
-# Sync repo pi/extensions/*.ts there. Repo is the source of truth; local edits
+# Sync all repo pi/extensions/ files there, recursively. Repo is the source of truth; local edits
 # can be pulled back interactively (same r/l/d/s flow as other config files).
 # Only runs if ~/.pi/agent exists (i.e. Pi CLI is installed for this user).
 sync_pi_extensions() {

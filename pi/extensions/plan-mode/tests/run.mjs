@@ -4,8 +4,8 @@
  *
  * Modes:
  *   node run.mjs                  — GATE mode: observed behavior vs post-Phase-1
- *                                  targets. Exits 1 on any mismatch. Pre-Phase-1,
- *                                  mismatches are the documented holes — expected.
+ *                                  targets. Exits 1 on any mismatch.
+ *   node run.mjs --sandbox        — kernel sandbox probes. Exits 1 if any probe fails.
  *   node run.mjs --snapshot       — record observed behavior to baseline-1.4.0.json
  *                                  (the pre-change snapshot; discharges the "re-run
  *                                  redteam" requirement).

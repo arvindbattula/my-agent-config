@@ -14,15 +14,17 @@ Read-only exploration mode for safe code analysis.
 ## Commands
 
 - `/plan` - Toggle plan mode
+- `/plan-airgap` - Toggle airgap plan mode (also `--plan-airgap` at startup)
 - `/todos` - Show current plan progress
 - `Ctrl+Alt+P` - Toggle plan mode (shortcut)
+- `Ctrl+Alt+A` - Toggle airgap plan mode (shortcut)
 
 **Trigger assist:** the first time a prompt looks like multi-file/structural work (refactor/migrate keywords, or 3+ file mentions), pi shows a one-line "consider /plan?" hint — once per session, never auto-entering plan mode. Short or "just do it" prompts never trigger it.
 
 ## Usage
 
 1. Enable plan mode with `/plan` or `--plan` flag
-2. The agent works in phases: **clarify** (interviews you via the questionnaire — highest-leverage questions first, 5–10 max), **explore** (reads the code, notes files touched and likely conflicts), **plan**, **self-review** (re-checks against your goals, flags its least-confident step)
+2. The agent works in phases: **clarify** (interviews you via the `questionnaire` tool, or in plain text under `--print` — highest-leverage questions first, 5–10 max; the model may read code first, see AUDIT.md), **explore** (reads the code, notes files touched and likely conflicts), **plan**, **self-review** (re-checks against your goals, flags its least-confident step)
 3. The plan is a numbered list under a `Plan:` header, each step in the form:
 
 ```
@@ -34,7 +36,7 @@ Risks:
 - ...
 ```
 
-The `done when:` / `Verify:` suffixes become load-bearing in Phase 3 (verified step completion); for now they make the plan self-auditing.
+`Verify:` checks are run by the harness when a step is marked complete. `done when:` keeps the plan self-auditing.
 
 4. Choose "Execute the plan" when prompted — or "Refine the plan", which now offers two modes: **an interview** (the model grills you with questions until you're aligned, then rewrites the plan — the Grill-Me pattern) or the classic **free-form editor**
 5. During execution, the agent marks steps complete with `plan_step_done` (or `[DONE:n]` as fallback) — steps with `[Verify: ...]` checks complete only when the harness check passes
@@ -51,17 +53,17 @@ While plan or airgap mode is active, **every bash command runs inside an OS-leve
 - **Fail-closed in airgap:** if the sandbox cannot initialize, airgap blocks ALL bash. Plan mode degrades to the allowlist with a visible warning.
 - User-typed `!`/`!!` commands get the same sandbox while a planning mode is active.
 - Kill switch: `pi --no-plan-sandbox` disables the kernel layer (allowlist still applies).
-- Verified by `node tests/run.mjs --sandbox` (11 kernel probes) — writes, network, and the regex-bypass vectors (`sh -c`, `git --output`, `sort -o`) all fail at the OS level.
+- Verified by `node tests/run.mjs --sandbox` (11 kernel probes) — writes, network, and the regex-bypass vectors (`sh -c`, `git --output`, `sort -o`) all fail at the OS level. It prints `n passed, m skipped, k failed` and exits 1 only when a probe fails.
 
 #### Install the dependency (all platforms)
 
-`./install.sh` installs it with `npm ci`, and `--status` reports when it is missing. To run the tests from a repo checkout, also run `npm install` in this directory.
+`./install.sh` installs it with `npm ci`, and `--status` reports when it is missing. To run the tests from a repo checkout, also run `npm ci` in this directory.
 
 Without the dependency, `pi` exits with `Cannot find module '@anthropic-ai/sandbox-runtime'`, even when no planning mode was requested. `pi -ne` starts without extensions, and therefore without plan mode or airgap.
 
 #### Linux prerequisites
 
-Beyond the npm dependency, macOS needs nothing extra. Linux needs three binaries on `PATH`; if any is missing, the sandbox cannot initialize, so airgap blocks all bash and plan mode falls back to the allowlist.
+Beyond the npm dependency, macOS needs nothing extra. Linux needs three binaries on `PATH`; if any is missing, the sandbox cannot initialize, so airgap blocks all bash and plan mode falls back to the allowlist. The failure message names the packages to install.
 
 ```bash
 sudo apt-get install bubblewrap socat ripgrep   # Debian/Ubuntu
@@ -127,5 +129,6 @@ Blocked (segment head or content):
 - `env` with any arguments or assignments (`LD_PRELOAD=…`, `PAGER=sh git …`)
 - System: `sudo`, `kill`, `reboot`, editors (`vim`, `nano`, `code`)
 
-Bash in plan mode is a guardrail, not a sandbox — see AUDIT.md. Airgap mode
+The allowlist is a guardrail; the kernel sandbox is the boundary, unless it failed
+to initialize — see AUDIT.md. Airgap mode
 (`--plan-airgap`) allows only: `cat`, `grep`, `ls`, `find`, `head`, `tail`, `wc`, `pwd`.

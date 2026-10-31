@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse hook: block edits/writes to protected paths before they happen.
-# Protected: .env files, .git/ directory contents, generated/ prefix,
+# Protected at the project root: .env files, .git/ directory contents, generated/
+# prefix. Paths admitted only through CLAUDE_PROJECT_DIR refuse .env and .git at any depth.
+# Also protected:
 # and any path outside the project (cwd or CLAUDE_PROJECT_DIR) — except the Claude
 # session scratchpad (<temp>/claude[-<uid>]/), plan files (~/.claude/plans/), and
 # auto-memory (~/.claude/projects/*/memory/), which Claude Code directs
