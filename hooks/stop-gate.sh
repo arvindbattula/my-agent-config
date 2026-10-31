@@ -23,7 +23,12 @@ fi
 # nudge and retried. Let it stop to avoid an infinite loop.
 [ "$STOP_ACTIVE" = "true" ] && exit 0
 
-GATE_FILE="$CWD/.hook-state/last_design_gate.json"
+# Must resolve to the same project root as design-antipattern-check.sh.
+STATE_ROOT="$CWD"
+case "${CLAUDE_PROJECT_DIR:-}" in
+  /*|[A-Za-z]:*) if [ -d "$CLAUDE_PROJECT_DIR" ]; then STATE_ROOT="$CLAUDE_PROJECT_DIR"; fi ;;
+esac
+GATE_FILE="$STATE_ROOT/.hook-state/last_design_gate.json"
 
 # No gate has run yet — allow completion
 [ -f "$GATE_FILE" ] || exit 0

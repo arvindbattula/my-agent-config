@@ -204,6 +204,46 @@ printf '%s\n' "$BAD" > "$PROJ/one.css"; design "$PROJ/one.css" "$SID_A"
 stop "$SID_A"; expect_exit "stop blocks first time (stop_hook_active=false)" 2
 stop_active "$SID_A"; expect_exit "stop_hook_active=true releases despite failing gate" 0
 
+# 6. A Bash cd moves the payload cwd but not CLAUDE_PROJECT_DIR, so the gate
+# must keep one state file per project, whichever directory each hook sees.
+GROOT="$TMP/gate-root"; GSUB="$GROOT/web"; mkdir -p "$GSUB"
+design_at() { # <cwd> <file>
+  run_hook design-antipattern-check.sh \
+    "$(printf '{"tool_input":{"file_path":%s},"cwd":%s,"session_id":"cd-session"}' \
+      "$(json "$2")" "$(json "$1")")"
+}
+stop_at() { # <cwd>
+  run_hook stop-gate.sh "$(printf '{"cwd":%s,"session_id":"cd-session"}' "$(json "$1")")"
+}
+root_keys() { jq -r '.failing_files | keys | join(",")' "$GROOT/.hook-state/last_design_gate.json" 2>/dev/null; }
+
+printf '%s\n' "$BAD" > "$GSUB/a.css"
+CLAUDE_PROJECT_DIR="$GROOT" design_at "$GSUB" "$GSUB/a.css"
+CLAUDE_PROJECT_DIR="$GROOT" stop_at "$GROOT"; expect_exit "failure recorded in a subdirectory blocks stop from root" 2
+[ ! -e "$GSUB/.hook-state" ] && pass "no state directory created in the subdirectory" || fail "no state directory created in the subdirectory"
+
+rm -rf "$GROOT/.hook-state" "$GSUB/.hook-state"
+CLAUDE_PROJECT_DIR="$GROOT" design_at "$GROOT" "$GSUB/a.css"
+CLAUDE_PROJECT_DIR="$GROOT" stop_at "$GSUB"; expect_exit "failure recorded at root blocks stop from a subdirectory" 2
+
+printf '%s\n' "$GOOD" > "$GSUB/a.css"
+CLAUDE_PROJECT_DIR="$GROOT" design_at "$GSUB" "$GSUB/a.css"
+CLAUDE_PROJECT_DIR="$GROOT" stop_at "$GROOT"; expect_exit "fix made in a subdirectory clears the gate at root" 0
+[ -z "$(root_keys)" ] && pass "gate empty after a subdirectory fix" || fail "gate empty after a subdirectory fix (got '$(root_keys)')"
+
+# Same acceptance rule as protect-paths.sh: only an existing absolute directory
+# counts as the project root; anything else falls back to the payload cwd.
+for bad_root in "relative/root" "$TMP/no-such-project"; do
+  rm -rf "$GROOT/.hook-state" "$GSUB/.hook-state"
+  printf '%s\n' "$BAD" > "$GSUB/a.css"
+  CLAUDE_PROJECT_DIR="$bad_root" design_at "$GSUB" "$GSUB/a.css"
+  [ -f "$GSUB/.hook-state/last_design_gate.json" ] \
+    && pass "unusable CLAUDE_PROJECT_DIR falls back to cwd ($bad_root)" \
+    || fail "unusable CLAUDE_PROJECT_DIR falls back to cwd ($bad_root)"
+  CLAUDE_PROJECT_DIR="$bad_root" stop_at "$GSUB"; expect_exit "stop reads the cwd fallback ($bad_root)" 2
+done
+[ ! -e "$TMP/no-such-project" ] && pass "a missing project root is not created" || fail "a missing project root is not created"
+
 # ── design-antipattern-prevent.sh (PreToolUse) ────────────────────────────
 echo "design-antipattern-prevent.sh"
 prevent() { # <file_path> <content>

@@ -47,7 +47,15 @@ fi
 # than carried over (prevents cross-session hard-blocks). failing_files tracks
 # each file independently so fixing one file doesn't mask another still-failing
 # file (avoids the last-file-wins gap).
-STATE_DIR="$CWD/.hook-state"
+#
+# A Bash cd moves CWD but not CLAUDE_PROJECT_DIR, so prefer the latter: this
+# hook and stop-gate.sh must agree on one state file per project. Same rule as
+# protect-paths.sh: only an existing absolute directory counts.
+STATE_ROOT="$CWD"
+case "${CLAUDE_PROJECT_DIR:-}" in
+  /*|[A-Za-z]:*) if [ -d "$CLAUDE_PROJECT_DIR" ]; then STATE_ROOT="$CLAUDE_PROJECT_DIR"; fi ;;
+esac
+STATE_DIR="$STATE_ROOT/.hook-state"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 GATE_FILE="$STATE_DIR/last_design_gate.json"
 
