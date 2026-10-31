@@ -10,7 +10,10 @@
   "hideThinkingBlock": false,
   "defaultThinkingLevel": "high",
   "retry": {
-    "enabled": false
+    "enabled": false,
+    "provider": {
+      "maxRetries": 2
+    }
   },
   "compaction": {
     "reserveTokens": 32768
