@@ -3,8 +3,8 @@
  *
  * Ported from the Claude Code bash hooks (protect-paths.sh, command-policy.sh,
  * design-antipattern-check.sh, compress-memory.sh) to TypeScript so the same
- * deterministic rules run in Pi via extension event handlers. Path rules are
- * narrower than protect-paths.sh; pi/extensions/README.md lists the differences.
+ * deterministic rules run in Pi via extension event handlers. Path exemptions
+ * differ from protect-paths.sh; pi/extensions/README.md lists the differences.
  *
  * Extracted as pure functions for unit testing — see lifecycle-guards.test.mjs.
  */
@@ -16,11 +16,11 @@ export interface PathCheckResult {
 	reason?: string;
 }
 
-/** Exact-match protected file names (secrets). */
+/** Exact-match protected file names (secrets), at any depth. */
 const PROTECTED_EXACT = new Set([".env", ".env.local"]);
 
-/** Protected path prefixes (generated code, git internals). */
-const PROTECTED_PREFIXES = ["generated/", ".git/"];
+/** Protected path prefixes at the project root (generated code). */
+const PROTECTED_PREFIXES = ["generated/"];
 
 /** Protected glob patterns for .env.* files. */
 const ENV_GLOB = /^\.env\..+/;
@@ -61,8 +61,11 @@ export function isProtectedPath(filePath: string, cwd: string): PathCheckResult 
 		? normalized.slice(cwdNormalized.length + 1)
 		: "";
 
+	const segments = rel.split("/");
+	const name = segments[segments.length - 1];
+
 	// Check: exact protected files
-	if (PROTECTED_EXACT.has(rel)) {
+	if (PROTECTED_EXACT.has(name)) {
 		return {
 			blocked: true,
 			reason: `${rel} is a secrets file. Do not edit .env files directly.`,
@@ -70,22 +73,24 @@ export function isProtectedPath(filePath: string, cwd: string): PathCheckResult 
 	}
 
 	// Check: .env.* glob
-	if (ENV_GLOB.test(rel)) {
+	if (ENV_GLOB.test(name)) {
 		return {
 			blocked: true,
 			reason: `${rel} is a secrets file. Do not edit .env files directly.`,
 		};
 	}
 
+	// Check: .git at any depth (a worktree or submodule has a .git file)
+	if (segments.includes(".git")) {
+		return {
+			blocked: true,
+			reason: `${rel} is inside .git/. Use application code or tests instead.`,
+		};
+	}
+
 	// Check: protected prefixes
 	for (const prefix of PROTECTED_PREFIXES) {
 		if (rel.startsWith(prefix)) {
-			if (prefix === ".git/") {
-				return {
-					blocked: true,
-					reason: `${rel} is inside .git/. Use application code or tests instead.`,
-				};
-			}
 			return {
 				blocked: true,
 				reason: `${rel} is in generated/. This is auto-generated code — edit the source instead.`,

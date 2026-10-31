@@ -53,6 +53,17 @@ pp "generated/x.ts";  expect_exit "block generated/" 2
 pp ".git/config";     expect_exit "block .git/" 2
 pp "../outside.txt";  expect_exit "block path outside repo" 2
 pp "sub/../.env";     expect_exit "block .env via traversal" 2
+# Secrets and git internals are protected wherever they sit in the project.
+pp "sub/.env";            expect_exit "block nested .env" 2
+pp "sub/.env.local";      expect_exit "block nested .env.local" 2
+pp "a/b/.env.production"; expect_exit "block deeply nested .env.production" 2
+pp "sub/.git/config";     expect_exit "block nested .git/" 2
+pp "sub/.git";            expect_exit "block a nested .git file (worktree or submodule link)" 2
+pp "sub/.envrc";          expect_exit "allow .envrc" 0
+pp "sub/env.txt";         expect_exit "allow env.txt" 0
+pp ".env/bin/activate";   expect_exit "allow a directory named .env (Python virtualenv)" 0
+pp "sub/.gitignore";      expect_exit "allow nested .gitignore" 0
+pp "sub/generated/x.ts";  expect_exit "allow nested generated/ (root-only rule)" 0
 pp "src/app.ts";      expect_exit "allow src/app.ts" 0
 pp "docs/readme.md";  expect_exit "allow docs/readme.md" 0
 
@@ -285,6 +296,20 @@ if [ -f "$PROJ/reports/session-audit.log" ] && jq -e . "$PROJ/reports/session-au
 else
   fail "audit log written as valid JSONL"
 fi
+
+# A Bash cd moves the payload cwd, so the audit log must stay at the project root.
+SEROOT="$TMP/se-root"; SESUB="$SEROOT/web"; mkdir -p "$SESUB"
+se_at() { run_hook session-end.sh "$(printf '{"session_id":"abc","reason":"quit","cwd":%s}' "$(json "$SESUB")")"; }
+CLAUDE_PROJECT_DIR="$SEROOT" se_at
+[ -f "$SEROOT/reports/session-audit.log" ] && pass "audit log stays at the project root after cd" || fail "audit log stays at the project root after cd"
+[ ! -e "$SESUB/reports" ] && pass "no reports directory created in the subdirectory" || fail "no reports directory created in the subdirectory"
+for bad_root in "relative/root" "$TMP/no-such-se-project"; do
+  rm -rf "$SESUB/reports"
+  CLAUDE_PROJECT_DIR="$bad_root" se_at
+  [ -f "$SESUB/reports/session-audit.log" ] \
+    && pass "unusable CLAUDE_PROJECT_DIR falls back to cwd for the audit log ($bad_root)" \
+    || fail "unusable CLAUDE_PROJECT_DIR falls back to cwd for the audit log ($bad_root)"
+done
 
 # ── summary ───────────────────────────────────────────────────────────────
 echo

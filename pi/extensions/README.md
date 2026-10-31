@@ -32,7 +32,7 @@ Model specs (`MODEL_SPECS`) are sourced from pi-ai's bundled `anthropic.json` ca
 Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extension event system. Provides the same rules in both runtimes, apart from the differences listed under **Claude Code and Pi differences** below:
 
 - **Session context** (`before_agent_start`) — injects workflow reminder at session start.
-- **Protected paths** (`tool_call: write/edit`) — blocks edits to `.env`, `.env.*`, `.git/` and `generated/` at the project root, and paths outside the project root.
+- **Protected paths** (`tool_call: write/edit`) — blocks edits to `.env` and `.env.*` files and `.git` at any depth, `generated/` at the project root, and paths outside the project root.
 - **Command policy** (`tool_call: bash`) — blocks destructive shell commands (`rm -rf /`, `DROP TABLE`, `cat .env`, force-push to main/master).
 - **Memory compression** (`tool_result: write`) — compresses prose in `memory/*.md` files (removes filler words, replaces verbose phrases, preserves code/URLs/headings/frontmatter).
 - **Design antipattern check** (`tool_result: write/edit`) — detects AI-tell patterns in frontend files (pure black/white, HSL, purple gradients, Inter/Roboto fonts, side-stripe borders, gradient text). Tracks each failing file independently (fixing one file never masks another) and mirrors state to `.hook-state/last_design_gate.json` for observability.
@@ -50,20 +50,19 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | Area | Claude Code hooks | Pi lifecycle-guards |
 |---|---|---|
 | Project root | `cwd` plus `CLAUDE_PROJECT_DIR`, because a Bash `cd` moves `cwd` | `ctx.cwd` only, because Pi's `cd` doesn't persist between commands |
-| Nested `.env` and `.git` | Refused at any depth for paths allowed only through `CLAUDE_PROJECT_DIR`; allowed inside `cwd` | Allowed; only root-level paths are checked |
 | Paths outside the project | Allows the session scratchpad, plan files and auto-memory | No exemptions |
 | Design anti-patterns | Blocks before writing, and checks after | Checks after writing only |
 | Finishing with failing files | Blocks once, then lets the retry finish | Queues up to 3 follow-ups, re-armed when the failing set changes |
-| `.hook-state/` location | Project root | `ctx.cwd` |
+| `.hook-state/` and `reports/` location | Project root | `ctx.cwd` |
 
-**Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (69 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (102 assertions across six hooks, including command-policy parity, per-file gate tracking, cross-session staleness, and the project root after `cd`).
+**Tests:** `node pi/extensions/lifecycle-guards/lifecycle-guards.test.mjs` (79 unit tests for pure logic in `utils.ts`). The Claude Code side has a matching behavioral harness: `bash hooks/hooks.test.sh` (116 assertions across six hooks, including command-policy parity, per-file gate tracking, cross-session staleness, and the project root after `cd`).
 
 ### Test files
 
 | File | Checks | What it guards |
 |---|---|---|
 | `azure-stream-result.test.mjs` | 23 | `result()` contract without iteration; retry loop on transient HTTP; abort-aware backoff; stop-reason mapping; pending fallback for partial streams |
-| `lifecycle-guards/lifecycle-guards.test.mjs` | 69 | Pure-logic unit tests for all guard rules |
+| `lifecycle-guards/lifecycle-guards.test.mjs` | 79 | Pure-logic unit tests for all guard rules |
 | `azure-model-specs.test.mjs` | 75 | `MODEL_SPECS` parity with pi-ai's bundled `anthropic.json` (context, maxTokens, reasoning, cost, thinkingLevelMap, adaptive) |
 | `azure-reasoning-effort.test.mjs` | 10 | `reasoning_effort` sent from `options.reasoning` with clamping; `off`/undefined omitted; non-reasoning model excluded |
 | `session-stats.test.mjs` | — | `computeSessionTotals` cost/token totals parity with pi's `getUsageCostBreakdown`; `formatTokens`/`sanitizeStatusText` |

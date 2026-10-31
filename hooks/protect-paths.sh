@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # PreToolUse hook: block edits/writes to protected paths before they happen.
-# Protected at the project root: .env files, .git/ directory contents, generated/
-# prefix. Paths admitted only through CLAUDE_PROJECT_DIR refuse .env and .git at any depth.
-# Also protected:
+# Protected: .env and .env.* files and .git at any depth, the root generated/ prefix,
 # and any path outside the project (cwd or CLAUDE_PROJECT_DIR) — except the Claude
 # session scratchpad (<temp>/claude[-<uid>]/), plan files (~/.claude/plans/), and
 # auto-memory (~/.claude/projects/*/memory/), which Claude Code directs
@@ -150,19 +148,6 @@ case "$NORMALIZED" in
   *)
     case "$NORMALIZED" in
       "${PROJECT_ABS:-/nonexistent-project-root}"/*)
-        # Allowed only through the session's project, so .env and .git are
-        # refused at any depth. Outside cwd they were blocked before this root
-        # existed, and the root-relative checks below would miss b/.env.
-        case "/${NORMALIZED#"$PROJECT_ABS"/}/" in
-          */.env/*|*/.env.*/*)
-            echo "BLOCKED: $NORMALIZED is a secrets file. Do not edit .env files directly." >&2
-            exit 2
-            ;;
-          */.git/*)
-            echo "BLOCKED: $NORMALIZED is inside .git/. Use application code or tests instead." >&2
-            exit 2
-            ;;
-        esac
         ROOT="$PROJECT_ABS"
         ;;
       *)
@@ -177,17 +162,17 @@ esac
 # Relative path from project root for pattern matching
 REL="${NORMALIZED#"$ROOT"/}"
 
-# --- Check 2: .env files ---
-case "$REL" in
-  .env|.env.local|.env.*)
+# --- Check 2: .env files, at any depth ---
+case "/$REL" in
+  */.env|*/.env.*)
     echo "BLOCKED: $REL is a secrets file. Do not edit .env files directly." >&2
     exit 2
     ;;
 esac
 
-# --- Check 3: .git/ directory contents ---
-case "$REL" in
-  .git/*)
+# --- Check 3: .git at any depth (a worktree or submodule has a .git file) ---
+case "/$REL" in
+  */.git|*/.git/*)
     echo "BLOCKED: $REL is inside .git/. Use application code or tests instead." >&2
     exit 2
     ;;

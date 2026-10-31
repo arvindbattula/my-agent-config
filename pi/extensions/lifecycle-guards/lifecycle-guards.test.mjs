@@ -63,6 +63,27 @@ test("isProtectedPath: .git/config is blocked", () => {
 	assert.match(result.reason, /\.git/);
 });
 
+// Secrets and git internals are protected wherever they sit in the project.
+for (const [path, reason] of [
+	["sub/.env", /secrets/],
+	["sub/.env.local", /secrets/],
+	["a/b/.env.production", /secrets/],
+	["sub/.git/config", /\.git/],
+	["sub/.git", /\.git/],
+]) {
+	test(`isProtectedPath: nested ${path} is blocked`, () => {
+		const result = isProtectedPath(path, "/tmp/test-project");
+		assert.equal(result.blocked, true);
+		assert.match(result.reason, reason);
+	});
+}
+
+for (const path of ["sub/.envrc", "sub/env.txt", ".env/bin/activate", "sub/.gitignore", "sub/generated/x.ts"]) {
+	test(`isProtectedPath: ${path} is allowed`, () => {
+		assert.equal(isProtectedPath(path, "/tmp/test-project").blocked, false);
+	});
+}
+
 test("isProtectedPath: generated/ is blocked", () => {
 	const result = isProtectedPath("generated/api.ts", "/tmp/test-project");
 	assert.equal(result.blocked, true);
