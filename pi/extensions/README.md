@@ -174,11 +174,13 @@ The pi 1.4.0 update migrated pi from an npm global install to the managed instal
 
 **Lesson:** the breakage came from the *install layout* changing, not the extension API — reinforces running the test suite after every pi update, including installer migrations.
 
-### Valar has no retry coverage
+### Valar retries at the provider level
 
-`settings.json` sets `"retry": {"enabled": false}` globally — correct for the Azure providers, which retry in-extension via `lib/transient-retry.ts` so failed attempts stay out of the chat UI. But `pi/models.json` also defines a `valar` provider with no in-extension retry, so it gets zero retry on anything. All of pi's recent retry improvements (OpenAI Responses early-stream, DNS failures, summarization retry) are switched off for it.
+`settings.json` sets `"retry": {"enabled": false}` globally, because the Azure providers retry in-extension via `lib/transient-retry.ts`, which keeps failed attempts out of the chat UI. Enabling Pi's agent-level retry would stack on top of that.
 
-**Decision:** accept the tradeoff. Re-enabling pi's retry globally would stack retries on the Azure providers (which already retry in-extension), producing duplicate attempts and multiple error lines in the TUI. Stripping the in-extension loops to migrate to pi's retry would lose the clean single-error UI. Valar is now the default provider, so this tradeoff is due for review: it still has no retry coverage.
+**Decision:** Valar uses `retry.provider.maxRetries: 2` instead. Pi passes it to its built-in transports, and Valar uses the built-in `openai-completions` transport. The Azure extensions don't read `options.maxRetries`, so they aren't affected.
+
+Tested with a mock provider on Pi 1.4.0: one 503 is retried and succeeds, a 429 honours `Retry-After`, a 400 isn't retried, and a persistent 503 stops after 3 attempts. It covers failed requests, not a stream that dies partway. Feynman has its own settings and isn't covered.
 
 ### azure-openai-models.ts does not inherit tool-call-ID hardening
 
