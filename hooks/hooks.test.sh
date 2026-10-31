@@ -53,7 +53,7 @@ pp "sub/../.env";     expect_exit "block .env via traversal" 2
 pp "src/app.ts";      expect_exit "allow src/app.ts" 0
 pp "docs/readme.md";  expect_exit "allow docs/readme.md" 0
 
-# Outside-root exemptions: scratchpad (<temp>/claude/), plans, memory.
+# Outside-root exemptions: scratchpad (<temp>/claude[-<uid>]/), plans, memory.
 # pp_from runs the hook with an explicit TMPDIR and cwd distinct from the
 # temp root, so the exemption (not the inside-project branch) is what allows.
 EXEMPT_PROJ="$TMP/exempt-proj"; mkdir -p "$EXEMPT_PROJ"
@@ -65,6 +65,16 @@ pp_from() { # <file_path> — cwd=$EXEMPT_PROJ, TMPDIR=$TMP
 pp_from "$TMP/claude/sess/scratchpad/x.txt"; expect_exit "allow scratchpad under \$TMPDIR/claude" 0
 pp_from "$TMP/no-claude/x.txt";              expect_exit "block temp path outside claude/ subtree" 2
 pp_from "/tmp/claude/sess/scratchpad/x.txt"; expect_exit "allow /tmp/claude (literal fallback root)" 0
+# Real scratchpads live in claude-<uid>, and macOS reports /tmp as /private/tmp.
+PP_UID="$(id -u)"
+pp_from "$TMP/claude-$PP_UID/slug/sess/scratchpad/x.txt";          expect_exit "allow scratchpad under \$TMPDIR/claude-<uid>" 0
+pp_from "/private/tmp/claude-$PP_UID/slug/sess/scratchpad/x.txt";  expect_exit "allow real macOS scratchpad path" 0
+pp_from "/private/tmp/claude/sess/scratchpad/x.txt";               expect_exit "allow /private/tmp/claude" 0
+pp_from "$TMP/claude-99999/x.txt";                 expect_exit "block another user's claude-<uid>" 2
+pp_from "/private/tmp/claude-99999/x.txt";         expect_exit "block another user's claude-<uid> under /private/tmp" 2
+pp_from "$TMP/claude-$PP_UID-evil/x.txt";          expect_exit "block name extending claude-<uid>" 2
+pp_from "/private/tmp/no-claude/x.txt";            expect_exit "block /private/tmp outside claude subtree" 2
+pp_from "/private/tmp/claude-$PP_UID/../escape.txt"; expect_exit "block traversal out of claude-<uid>" 2
 pp_from "$HOME/.claude/plans/x.md";          expect_exit "allow plan-mode file in ~/.claude/plans" 0
 pp_from "$HOME/.claude/projects/some-proj/memory/note.md"; expect_exit "allow auto-memory file" 0
 
