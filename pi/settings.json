@@ -4,7 +4,7 @@
     "~/.pi/agent/extensions/azure-foundry.ts",
     "~/.pi/agent/extensions/azure-openai-models.ts"
   ],
-  "lastChangelogVersion": "1.4.0",
+  "lastChangelogVersion": "1.5.0",
   "defaultProvider": "valar",
   "defaultModel": "zai-org/GLM-5.3",
   "hideThinkingBlock": false,
@@ -23,5 +23,8 @@
   ],
   "defaultTools": [
     "+codemode"
-  ]
+  ],
+  "extensionChangelogVersions": {
+    "{\"source\":\"npm:@luxusai/pi-hindsight\",\"scope\":\"user\"}": "0.13.0"
+  }
 }
