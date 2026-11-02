@@ -909,3 +909,46 @@ with a scoped tool set. The pattern that scales multi-part analyses
 
 If it gets built, document it above under a Feature-addition heading and
 remove it from this list.
+
+## Pi 1.5.0 update: upstream sandbox example removed; compatibility verified (2026-11-02)
+
+**Upstream removed the native OS sandbox example** (`examples/extensions/sandbox/`) in pi
+1.5.0, along with its dependency. Our Phase 2 kernel layer copied
+`createSandboxedBashOps` from that example and pins `@anthropic-ai/sandbox-runtime` at
+0.0.81 in `plan-mode/package.json` — both keep working. Consequences:
+
+- **The "compare with the upstream example after a pi update" maintenance rule is retired
+  for the sandbox layer.** There is no upstream example to compare against in 1.5.0+.
+  The last reference copy lives in the on-disk managed install
+  `install/releases/1.4.0/node_modules/@earendil-works/pi-coding-agent/examples/extensions/sandbox/`.
+- The kernel layer is now fully owned by this snapshot. If `@anthropic-ai/sandbox-runtime`
+  stops receiving updates, pi's blessed replacements are the Gondolin example / the
+  containerization guide — revisit only then.
+
+**1.5.0 compatibility, verified (not assumed from the changelog):**
+
+- `import { Type } from "typebox"` still resolves — the 1.5.0 loader aliases `typebox`,
+  `typebox/compile`, `typebox/value` and `@sinclair/typebox*` to its bundled copy
+  (`loader.js`. The pi-schema validation breaking change does not touch our tools:
+  `plan_step_done` and `questionnaire` use only JSON-Schema-compatible TypeBox
+  (`Type.Object/Integer/String/Optional/Array/Boolean`); no `Type.Refine`/`BigInt`/
+  `Undefined`/`Format.Set`/codecs anywhere in the extensions.
+- `createBashTool(cwd, { operations })` signature unchanged in 1.5.0's `bash.d.ts` —
+  the sandboxed bash override pattern is intact.
+- All extensions load under 1.5.0 (`PI_OFFLINE=1 pi --print --no-session` smoke test).
+- Corpus gate 127/127; `azure-model-specs` 75/75 against 1.5.0's models.dev v2 catalog;
+  `session-stats` parity with `getUsageCostBreakdown` passes.
+
+**Kernel probes NOT re-verified on 1.5.0 (owner decision 2026-11-02: defer — the
+pinned dep and the unmodified integration are trusted).** The deferral is recorded in
+docs/state.md. Re-run `node tests/run.mjs --sandbox` from a normal terminal before
+relying on plan/airgap bash isolation after any change to Phase 2 code.
+
+**Environmental gotcha (durable):** an agent-session shell (pi/codemode browsing
+session) cannot bind Unix sockets — `SandboxManager.initialize` fails with
+`listen EPERM` on its `srt-mux-*.sock`, and a bare `node net.createServer().listen()`
+reproduces it. The same shells cannot write `~/.azure` (the `az` CLI throws
+`PermissionError`), so `tests/run.mjs --sandbox`, `azure-stream-result.test.mjs` and
+`azure-reasoning-effort.test.mjs` FAIL from inside any agent session even when
+everything is fine. Always run them from a normal terminal; a failure from inside a
+session proves nothing.
