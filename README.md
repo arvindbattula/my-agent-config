@@ -128,6 +128,19 @@ Use `/decide` anytime during the workflow. Run `/retro` at milestones or when a 
 
 > **Light terminal:** Pi auto-detects terminal background; if it guesses wrong (e.g. a dark theme on a white terminal), text becomes unreadable. Set `"theme": "light"` in your **personal** `~/.pi/agent/settings.json` — this is machine/terminal-specific and intentionally not committed.
 
+### Pi Coding Agent
+
+The Pi CLI defaults to the **Valar provider, `zai-org/GLM-5.3`** (`pi/settings.json`), running on the **standard completion window** — the tier `pi/models.json` cost fields are priced against. Valar bills omitted-window requests at the highest (Now) tier, so `valar-completion-window.ts` injects `metadata.completion_window` on every Valar request (ADR-010).
+
+Key extensions (all synced to `~/.pi/agent/extensions/` by `install.sh`; per-extension detail in `pi/extensions/README.md`):
+
+- `valar-completion-window.ts` — injects the completion window on every Valar request, and registers the **`/valar`** command: interactive picker (window + thinking level) or direct args — `/valar <window> [level]` (e.g. `/valar priority high`); `now`→asap, `none`→off aliases; session-only, new sessions default to `standard` (ADR-011)
+- `plan-mode/` — verified plan execution (harness-checked `[Verify:]` steps, kernel sandbox on macOS/Linux; under agent-safehouse it degrades to the regex guardrail with one explained warning, ADR-012)
+- `questionnaire.ts` — the multi-tab select tool plan mode relies on
+- `statusline.ts` — two-line footer (above)
+- `azure-*.ts` — Azure Foundry / OpenAI provider extensions with their own retry loop
+- `verify-valar-window.mjs`, `*.test.mjs` — smoke/test suite; run `node pi/extensions/*.test.mjs` and the verify scripts after every pi update
+
 ## How Sync Works
 
 `install.sh` compares the repo and `~/.claude/` using file checksums:
@@ -155,6 +168,7 @@ The skills step only runs if `~/.agents` exists; the other Pi steps only run if 
 - `main` is protected — all changes require a PR, including the owner (no admin bypass)
 - PRs from non-collaborators are auto-closed
 - Direct pushes to `main` are rejected server-side and flagged via GitHub Actions
+- **Agents prepare PRs; merging is the owner's action** — an agent may branch, commit, run checks, and (when asked) push + open a PR, but must never merge, revert, or delete merged branches autonomously (`/ship` is the owner's phase; `rules/ask-dont-assume.md`)
 
 ## Origin
 
