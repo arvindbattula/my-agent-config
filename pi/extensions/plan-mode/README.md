@@ -77,6 +77,23 @@ sudo pacman -S bubblewrap socat ripgrep         # Arch
 - **Blocked namespaces look different from missing binaries:** the sandbox still reports ready, then every bash command fails with a `bwrap:` error, including in plan mode (no allowlist fallback). Nothing runs unsandboxed.
 - Confirm with `node tests/run.mjs --sandbox` from this directory. If bubblewrap cannot start, the denial probes report FAIL as "not run". Probes that can't prove anything on this machine, such as reading a `~/.aws/config` that doesn't exist, report SKIP.
 
+#### Agent Safehouse (macOS wrapper)
+
+If you launch pi inside [agent-safehouse](https://agent-safehouse.dev) (the Seatbelt wrapper; detected by `APP_SANDBOX_CONTAINER_ID`), every plan/airgap entry fails init with `listen EPERM …/srt-mux-<pid>-<seq>.sock` and the warning above appears (once per process — see AUDIT.md "Warn-once, safehouse-aware notifications"). Cause: safehouse's deny-by-default policy allows no Unix-socket binds, which the sandbox-runtime mux needs. Plan mode then runs on the regex guardrail only; **airgap fails closed (all bash blocked)**.
+
+To restore the kernel layer inside safehouse, allow the mux socket's exact path shape with the append-profile in [`safehouse/`](safehouse/):
+
+```bash
+# from a normal Terminal (not inside a sandboxed session):
+bash safehouse/install-safehouse-allowance.sh     # installs + validates + smoke-tests
+# then add to pi's safehouse launch:
+#   --append-profile="$HOME/.config/safehouse/append/srt-mux-pi.sb"
+bash safehouse/verify-safehouse-fix.sh             # full matrix incl. S-tier probes
+```
+
+The allowance covers only `srt-mux-[0-9]+-[0-9a-z]+.sock` in the per-user TMPDIR (bind+inbound for the mux, outbound for its in-process dispatch hop). Restart pi after wiring — the Seatbelt policy bakes at process start.
+
+
 ### Plan Mode (Read-Only)
 - Built-in `edit`/`write` disabled; other active tools (read, bash, grep, find, ls, questionnaire, memory tools) remain available
 - Bash commands filtered through the allowlist AND executed in the kernel sandbox

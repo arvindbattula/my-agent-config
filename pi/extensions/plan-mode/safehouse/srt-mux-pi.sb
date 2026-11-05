@@ -1,0 +1,33 @@
+;; ---------------------------------------------------------------------------
+;; Agent Safehouse append-profile for pi plan-mode's kernel sandbox (Phase 2).
+;;
+;; WHAT THIS UNBLOCKS
+;;   @anthropic-ai/sandbox-runtime's SandboxManager (used by the plan-mode
+;;   extension) runs a mux proxy in the pi process: it binds a per-process
+;;   Unix socket in the per-user TMPDIR for the HTTP backend and connect()s
+;;   it in-process to dispatch client connections:
+;;     $TMPDIR/srt-mux-<pid>-<base36-seq>.sock        (mux-proxy.js unixSocketPath)
+;;   Safehouse's deny-by-default policy allows no Unix-socket binds or
+;;   connects, so every /plan or /plan-airgap entry failed with
+;;   `listen EPERM .../srt-mux-<pid>-<seq>.sock` and plan mode degraded to
+;;   the regex guardrail (airgap fails closed, blocking all bash).
+;;
+;;   These two rules restore the kernel layer inside Safehouse, following
+;;   the same per-tool pattern Safehouse already uses for codex-app.sb's
+;;   SingletonSocket and vscode-app.sb's vscode-ipc sockets. Only the mux
+;;   socket's exact path shape is allowed — nothing else changes.
+;;
+;; INSTALL (from a normal Terminal, NOT from inside a sandboxed session):
+;;   ./install-safehouse-allowance.sh          # copies this file + smoke-tests
+;;   ... then add to the safehouse invocation that launches pi:
+;;     --append-profile="$HOME/.config/safehouse/append/srt-mux-pi.sb"
+;;   (the sandbox policy is baked at process start — restart pi to pick it up)
+;; ---------------------------------------------------------------------------
+
+(allow network-bind network-inbound
+    (local unix-socket
+        (path-regex #"^(/private)?/var/folders/[^/]+/[^/]+/T/srt-mux-[0-9]+-[0-9a-z]+\.sock$")))
+
+(allow network-outbound
+    (remote unix-socket
+        (path-regex #"^(/private)?/var/folders/[^/]+/[^/]+/T/srt-mux-[0-9]+-[0-9a-z]+\.sock$")))

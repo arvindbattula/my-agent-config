@@ -952,3 +952,52 @@ reproduces it. The same shells cannot write `~/.azure` (the `az` CLI throws
 `azure-reasoning-effort.test.mjs` FAIL from inside any agent session even when
 everything is fine. Always run them from a normal terminal; a failure from inside a
 session proves nothing.
+
+## Safehouse coexistence: srt-mux allowance + warn-once notifications (2026-11-05)
+
+**Root cause (diagnosed 2026-11-05, 100% confidence; see project memory):** the gotcha
+above is agent-safehouse's deny-by-default Seatbelt policy — it allows zero
+Unix-socket binds (verified in the composed 0.12.0 policy dump: the only bind allow
+is `(allow network-bind (local ip))`). The extension's kernel layer therefore NEVER
+initializes under safehouse — deterministically, on every /plan entry, not
+intermittently. The socket's seq suffix (`srt-mux-<pid>-<seq>`; module-level counter,
+never reset) is the per-process init-attempt counter, which is why the second entry
+shows `-1.sock`.
+
+**Fix A — safehouse allowance (this session):** `safehouse/srt-mux-pi.sb` grants
+bind+inbound and outbound for the mux socket's exact path shape in the per-user
+TMPDIR (BOTH rules required: the mux front-end `connect()`s its own unix backend —
+mux-proxy.js dispatchHttp — which is a `network-outbound` filter safehouse also
+denies by default). Installer + probe + verification matrix:
+`safehouse/install-safehouse-allowance.sh`, `verify-safehouse-fix.sh`. Wired into
+pi's safehouse launch via `--append-profile`. No extension change can substitute:
+the pinned `@anthropic-ai/sandbox-runtime@0.0.81` uses a TCP backend only on Windows
+(`httpBackendPortRange`), and no TMPDIR relocation helps since safehouse denies
+unix binds on every path.
+
+**Fix B — extension UX hardening (deliberate divergence, upstream example does NOT
+have this):**
+- `utils.ts composeSandboxInitFailure()` annotates `listen EPERM` failures inside
+  agent-safehouse (detected via `APP_SANDBOX_CONTAINER_ID`) as expected, points at
+  `safehouse/srt-mux-pi.sb`, and keeps the airgap fail-closed / plan-degrades
+  consequence sentences verbatim.
+- `index.ts activateSandboxForMode` now notifies ONCE per distinct failure message
+  per process (`lastSandboxInitFailureToast`, keyed by the composed message; a
+  successful init re-arms it). Rationale: the failure is deterministic under an
+  unbudging sandbox policy; the old every-entry toast was noise. The
+  `--no-plan-sandbox` and unsupported-platform branches stay un-deduped (explicit
+  deliberate states).
+- `tests/sandbox-init-failure.mjs` extended: 19 checks (was 11), covering compose
+  semantics in both safehouse and bare contexts. Corpus gate still 127/127.
+
+**Not done (deferred per existing trigger policy):** a statusline segment showing
+`plan (kernel)` vs `plan (regex)`. Trigger: you find yourself unsure which guardrail
+layer is active mid-session. (The no-warning/`Airgap FAILS CLOSED`-absence toasts
+now carry that signal.)
+
+**Owner decisions (2026-11-05):** local-only fix, no upstream PR to agent-safehouse
+(for now; the allowance matches their own codex-app.sb/vscode-app.sb per-tool
+socket pattern if that ever changes). Verification runs from Terminal per
+`verify-safehouse-fix.sh`; pending that, docs/state.md's "unix-socket binds"
+durable fact still stands for unaugmented safehouse sessions.
+
