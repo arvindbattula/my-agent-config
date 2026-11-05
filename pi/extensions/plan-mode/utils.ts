@@ -394,6 +394,34 @@ export function describeSandboxInitFailure(message: string): string {
 	return `${message} — install bubblewrap, socat and ripgrep (plan-mode README, "Linux prerequisites")`;
 }
 
+/**
+ * Composes the sandbox-init-failure toast. Two UX hardenings over the raw
+ * error (added 2026-11-05 — see AUDIT.md "Warn-once, safehouse-aware init
+ * failure notifications"):
+ *
+ *  1. When running inside agent-safehouse (detected via the
+ *     APP_SANDBOX_CONTAINER_ID marker) and the failure is a `listen EPERM`,
+ *     the message says so and points at the fix: safehouses deny-by-default
+ *     policy allows no Unix-socket binds, so the sandbox-runtime mux cannot
+ *     listen — this failure is expected there, not a pi bug. The fix rules
+ *     live in `safehouse/srt-mux-pi.sb` (README "Agent Safehouse (macOS
+ *     wrapper)").
+ *  2. The airgap/plan consequence sentence is preserved verbatim (airgap
+ *     fails closed; plan degrades to the regex guardrail).
+ */
+export function composeSandboxInitFailure(message: string, airgap: boolean): string {
+	const inSafehouse =
+		process.env.APP_SANDBOX_CONTAINER_ID !== undefined && /listen EPERM/.test(message);
+	const detail = inSafehouse
+		? `${message} — expected inside agent-safehouse (its Seatbelt policy denies Unix-socket binds, so the sandbox mux cannot listen; safehouse/srt-mux-pi.sb restores it)`
+		: message;
+	return `Kernel sandbox init failed: ${detail}. ${
+		airgap
+			? "Airgap FAILS CLOSED: bash commands will be blocked until the sandbox initializes."
+			: "Plan mode degrades to the regex guardrail."
+	}`;
+}
+
 /** Project-local plan-mode config: `.pi/plan-mode.json` (all optional). */
 export interface PlanModeConfig {
 	/** Harness-verified step completion (Phase 3). Default: true. */
