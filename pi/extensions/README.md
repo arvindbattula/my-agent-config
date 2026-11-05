@@ -190,6 +190,15 @@ Verified live (2026-11-06): `metadata.completion_window` is accepted on both non
 
 Caveat: when overriding away from `standard`, the billing tier changes but `models.json` cost display does not — `/stats` and the footer approximate standard rates. See ADR-010 in `docs/decisions.md`.
 
+#### `/valar` — interactive window + thinking picker
+
+The same extension registers a `/valar` slash command for per-session selection without restarting:
+
+- `/valar` — two selects: completion window (`Now (asap)` / `Priority` / `Standard`, current pre-marked, Esc skips) then thinking level (`off`..`max`, current pre-marked, Esc skips). Picking the current value is a no-op; a clamped thinking level is reported as the effective one.
+- `/valar <window>` — window only; `/valar <level>` — level only; `/valar <window> <level>` — both (order-free: the vocabularies are disjoint). `now` → `asap`, `none` → `off`; `flex` and unknown tokens get an error notification and are ignored.
+
+Window changes write the in-process `VALAR_COMPLETION_WINDOW` (the hook re-reads it per request — the change applies from the next request; new sessions default to `standard` again). Thinking changes go through `pi.setThinkingLevel`, which Pi records in session history and restores on resume — so a resumed session's level is faithful while its window falls back to the default. Argument autocomplete covers windows and levels; the interactive selects need a TUI (in `--print` mode only the argument form works).
+
 Tested with a mock provider on Pi 1.4.0: one 503 is retried and succeeds, a 429 honours `Retry-After`, a 400 isn't retried, and a persistent 503 stops after 3 attempts. It covers failed requests, not a stream that dies partway. Feynman has its own settings and isn't covered.
 
 ### azure-openai-models.ts does not inherit tool-call-ID hardening
