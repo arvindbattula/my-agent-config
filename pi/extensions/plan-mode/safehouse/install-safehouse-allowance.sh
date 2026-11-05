@@ -50,15 +50,21 @@ cat <<'WIRING'
 
 WIRING — pick the case that matches what the detection above shows:
 
-  ⚠️ DO NOT wire --append-profile into pi's launch yet ⚠️
-  Verification found a SECOND wall: applying a nested Seatbelt profile from
-  inside agent-safehouse is blocked by the OS (`sandbox-exec: sandbox_apply:
-  Operation not permitted`, exit 71). With ONLY the socket allowance wired,
-  the sandbox initializes and then EVERY wrapped plan/airgap bash command
-  fails. Keep this file installed for the probes, and wait for the
-  nesting experiment + the enforcement canary on feat/plan-mode-safehouse
-  before wiring it into pi(). (The plan-mode extension ≥ 2026-11-05 runs a
-  post-init canary that degrades gracefully even if you do.)
+  ⚠️ VERDICT (2026-11-05): DO NOT WIRE --append-profile INTO pi's LAUNCH ⚠️
+  macOS blocks applying a nested Seatbelt profile from inside an existing
+  sandbox (sandbox_apply: Operation not permitted, exit 71 — confirmed even
+  under an outer `(allow default)` policy, so no allow rule can lift it).
+  With only these socket rules wired, initialize would SUCCEED while every
+  wrapped plan/airgap bash child then fails its profile application. Keep
+  this file installed for the probe/verification matrix only. Inside
+  safehouse the plan-mode kernel layer can never enforce; the extension
+  degrades to the regex guardrail (warn-once) and its post-init canary
+  protects against accidental wiring. See README "Agent Safehouse (macOS
+  wrapper)" and AUDIT.md "Safehouse coexistence".
+
+  (The launcher detection below is kept for completeness — e.g. if the
+  nesting verdict is ever revisited, or another unix-socket-bound tool
+  needs the same wiring technique.)
 
   Case A: an alias/function in a shell rc file, e.g. `alias pi='safehouse --workdir ... pi'`
     -> add the flag to it:

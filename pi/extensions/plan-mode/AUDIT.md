@@ -969,11 +969,13 @@ bind+inbound and outbound for the mux socket's exact path shape in the per-user
 TMPDIR (BOTH rules required: the mux front-end `connect()`s its own unix backend —
 mux-proxy.js dispatchHttp — which is a `network-outbound` filter safehouse also
 denies by default). Installer + probe + verification matrix:
-`safehouse/install-safehouse-allowance.sh`, `verify-safehouse-fix.sh`. Wired into
-pi's safehouse launch via `--append-profile`. No extension change can substitute:
-the pinned `@anthropic-ai/sandbox-runtime@0.0.81` uses a TCP backend only on Windows
-(`httpBackendPortRange`), and no TMPDIR relocation helps since safehouse denies
-unix binds on every path.
+`safehouse/install-safehouse-allowance.sh`, `verify-safehouse-fix.sh`. Originally
+designed to be wired into pi's safehouse launch via `--append-profile` — REVERSED
+by the nesting verdict below (see "Second wall"): the allowance restores socket
+init only, never enforcement. No extension change can substitute for the bind
+wall: the pinned `@anthropic-ai/sandbox-runtime@0.0.81` uses a TCP backend only
+on Windows (`httpBackendPortRange`), and no TMPDIR relocation helps since
+safehouse denies unix binds on every path.
 
 **Fix B — extension UX hardening (deliberate divergence, upstream example does NOT
 have this):**
@@ -987,8 +989,9 @@ have this):**
   unbudging sandbox policy; the old every-entry toast was noise. The
   `--no-plan-sandbox` and unsupported-platform branches stay un-deduped (explicit
   deliberate states).
-- `tests/sandbox-init-failure.mjs` extended: 19 checks (was 11), covering compose
-  semantics in both safehouse and bare contexts. Corpus gate still 127/127.
+- `tests/sandbox-init-failure.mjs` extended: 23 checks (was 11), covering compose
+  semantics in both safehouse and bare contexts incl. the canary signature
+  matrix. Corpus gate still 127/127.
 
 **Not done (deferred per existing trigger policy):** a statusline segment showing
 `plan (kernel)` vs `plan (regex)`. Trigger: you find yourself unsure which guardrail
@@ -1009,12 +1012,17 @@ pass) but every wrapped command fails: the children run
 profile from inside an existing Seatbelt sandbox is blocked by the OS** —
 reproduced in-session as `sandbox-exec: sandbox_apply: Operation not permitted`,
 exit 71 — and agent-safehouse's own electron.sb documents exactly this as "not
-fixable with additional allow rules". Pending the bare-Terminal nesting
-experiment (outer `(allow default)` wrapper): if it confirms the OS block, the
-kernel layer can never enforce under safehouse and `srt-mux-pi.sb` must NOT be
-wired into pi's launch — init would report ready while every wrapped command
-bricks. If instead it is policy-gated, an additional allow rule in the same
-append-profile restores enforcement.
+fixable with additional allow rules".
+
+**VERDICT (confirmed 2026-11-05, bare-Terminal experiment):** wrapping the inner
+sandbox-exec in an outer `(allow default)` profile — the most permissive Seatbelt
+can express — STILL fails with `sandbox_apply: Operation not permitted`, exit 71.
+The nesting block is OS-level, not policy-gated; **no allow rule can lift it, and
+the kernel layer can never enforce commands inside agent-safehouse.**
+`srt-mux-pi.sb` therefore stays unwired (kept as the traced investigation artifact
+for socket-init-only needs, e.g. probes); inside safehouse, plan mode runs on the
+regex guardrail (warn-once + explained) and airgap stays fail-closed. The
+enforcement canary below makes the would-be brick degrade gracefully instead.
 
 **Enforcement canary (added 2026-11-05, branch `feat/plan-mode-safehouse`):**
 `ensureSandbox(config, key, verifyCwd)` now runs one wrapped `true` through the

@@ -1,10 +1,22 @@
 #!/bin/bash
-# Full verification matrix for the safehouse srt-mux fix (run AFTER
-# install-safehouse-allowance.sh and launcher wiring, from a normal Terminal).
+# Verification matrix for the plan-mode/safehouse diagnosis (run from a
+# normal Terminal — NOT from inside a sandboxed session).
 #
-# Automated parts run pi's plan-mode tests inside a safehouse'd shell both
-# without (control) and with (fixed) the allowance; the interactive TUI
-# checks are printed at the end for you to do by hand.
+# VERDICT (2026-11-05): the kernel layer can never enforce inside
+# agent-safehouse — two independent walls: (1) the composed policy allows no
+# unix-socket binds (mux listen EPERM); (2) applying a nested Seatbelt
+# profile is OS-blocked (sandbox_apply EPERM, exit 71, confirmed under an
+# outer `(allow default)`). srt-mux-pi.sb restores only wall (1) — it must
+# stay UNWIRED; this matrix documents both walls and proves no collateral.
+#
+# Automated parts run pi's plan-mode tests inside a safehouse'd shell
+# without (control) and with (socket-init-restored) the allowance; the
+# interactive degradation-UX checks are printed at the end.
+#
+# Expected outcomes:
+#   without allowance: S-tier exit 1, listen EPERM  (wall 1)
+#   with allowance:    S-tier exit 1, sandbox_apply/exit 71 in probe output
+#                      (wall 2 — labeled documented-PASS); corpus 127/127
 
 set -uo pipefail   # checks report; this script never hard-stops mid-matrix
 
@@ -45,7 +57,7 @@ echo "    WITH allowance (init should pass; enforcement may be OS-blocked):"
 echo "    exit=$rc; summary: $(grep -E 'passed|failed|skipped' /tmp/vsf-fix.out | head -3 | tr '\n' ' ')"
 if [ "$rc" = "0" ]; then
 	result "0" "0" "S-tier kernel probes PASS inside safehouse with the allowance"
-elif grep -q "sandbox_apply\|cannot enforce\|exit=71" /tmp/vsf-fix.out; then
+elif grep -qE "sandbox_apply|cannot enforce|exit=71" /tmp/vsf-fix.out; then
 	echo "PASS  nested Seatbelt is OS-blocked (documented, sandbox_apply/exit 71) — init passes, enforcement cannot; the extension canary degrades instead of bricking"
 	pass=$((pass+1))
 else
@@ -69,17 +81,21 @@ esac
 echo
 echo "===================== MANUAL TUI CHECKS (do by hand) ====================="
 cat <<'MANUAL'
-Start pi the way you wired it (safehouse ... -- pi) and check:
+Start pi under safehouse the way you always do (NOT with any wiring of
+srt-mux-pi.sb — it must stay unwired) and check the degradation UX:
 
-  7. Enter /plan          -> "Plan mode enabled" toast with NO "Kernel sandbox
-                            init failed" warning.
-  8. In plan mode, try a write, e.g.: touch PLAN-verify.txt
-                            -> blocked with "Operation not permitted" (seatbelt
-                            policy of the kernel sandbox, not just the regex).
-  9. /plan (exit), /plan (re-enter)  -> still no warning (2nd mux, seq 1).
- 10. /plan-airgap         -> initializes; bash works read-only instead of
-                            being blocked entirely (fail-closed is gone).
- 11. Optionally watch the live Seatbelt decisions while you do 7-10:
+  7. Enter /plan          -> "Plan mode enabled" toast + ONE toast:
+                            "Kernel sandbox init failed: listen EPERM …
+                            expected inside agent-safehouse … Plan mode degrades
+                            to the regex guardrail."
+  8. Enter /plan again (re-enter) -> NO repeat of the warning (warn-once)
+                            and no brick: bash still runs (regex guardrail).
+  9. In plan mode, try a write, e.g.: touch PLAN-verify.txt
+                            -> blocked by the REGEX tool handler with a block
+                            reason (that is the guardrail inside safehouse).
+10. /plan-airgap         -> fail-closed warning; ALL bash blocked while in
+                            airgap — expected under safehouse (by design).
+11. Optionally watch the live Seatbelt decisions while you do 7-10:
      /usr/bin/log stream --style compact \
        --predicate 'eventMessage CONTAINS "Sandbox:" AND eventMessage CONTAINS "deny("'
 MANUAL

@@ -79,19 +79,18 @@ sudo pacman -S bubblewrap socat ripgrep         # Arch
 
 #### Agent Safehouse (macOS wrapper)
 
-If you launch pi inside [agent-safehouse](https://agent-safehouse.dev) (the Seatbelt wrapper; detected by `APP_SANDBOX_CONTAINER_ID`), every plan/airgap entry fails init with `listen EPERM …/srt-mux-<pid>-<seq>.sock` and the warning above appears (once per process — see AUDIT.md "Warn-once, safehouse-aware notifications"). Cause: safehouse's deny-by-default policy allows no Unix-socket binds, which the sandbox-runtime mux needs. Plan mode then runs on the regex guardrail only; **airgap fails closed (all bash blocked)**.
+If you launch pi inside [agent-safehouse](https://agent-safehouse.dev) (the Seatbelt wrapper; detected by `APP_SANDBOX_CONTAINER_ID`), the kernel layer **cannot run there — an OS limitation, not a config problem**. Two independent walls:
 
-To restore the kernel layer inside safehouse, allow the mux socket's exact path shape with the append-profile in [`safehouse/`](safehouse/):
+1. **Mux bind wall (policy):** safehouse's deny-by-default policy allows no Unix-socket binds, so every plan/airgap init fails with `listen EPERM …/srt-mux-<pid>-<seq>.sock` (seq = per-process init-attempt counter) and the warning appears — once per process, explained (see AUDIT.md "Warn-once, safehouse-aware notifications"). Plan mode then runs on the regex guardrail; **airgap fails closed (all bash blocked)**.
+2. **Nesting wall (OS-level, unfixable):** even with the mux socket allowed (`safehouse/srt-mux-pi.sb` restores the bind/connect), macOS blocks applying a nested Seatbelt profile from inside an existing sandbox — `sandbox-exec: sandbox_apply: Operation not permitted`, exit 71 — verified under an outer `(allow default)` profile (2026-11-05), matching agent-safehouse's own electron.sb note ("not fixable with additional allow rules"). Wrapped children can therefore never run their profiles inside safehouse, so **the kernel layer can never enforce there**.
+
+**Consequently: do NOT wire `--append-profile` into pi's safehouse launch.** `safehouse/srt-mux-pi.sb` is kept as the traced investigation artifact (it restores socket init only, never enforcement); the post-init enforcement canary in `sandbox.ts` degrades gracefully if anyone wires it anyway. The full diagnosis is in AUDIT.md ("Safehouse coexistence"); `safehouse/verify-safehouse-fix.sh` reproduces both walls and the collateral checks (run it from a normal Terminal):
 
 ```bash
 # from a normal Terminal (not inside a sandboxed session):
-bash safehouse/install-safehouse-allowance.sh     # installs + validates + smoke-tests
-# then add to pi's safehouse launch:
-#   --append-profile="$HOME/.config/safehouse/append/srt-mux-pi.sb"
-bash safehouse/verify-safehouse-fix.sh             # full matrix incl. S-tier probes
+bash safehouse/install-safehouse-allowance.sh     # installs + validates + smoke-tests the socket rules
+bash safehouse/verify-safehouse-fix.sh             # reproduces both walls; labels the OS-block outcome
 ```
-
-The allowance covers only `srt-mux-[0-9]+-[0-9a-z]+.sock` in the per-user TMPDIR (bind+inbound for the mux, outbound for its in-process dispatch hop). Restart pi after wiring — the Seatbelt policy bakes at process start.
 
 
 ### Plan Mode (Read-Only)
