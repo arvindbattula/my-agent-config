@@ -25,8 +25,11 @@ check("hint added: ripgrep missing", describeSandboxInitFailure("Sandbox depende
 
 // ── composeSandboxInitFailure (2026-11-05 UX hardening) ──────────────
 // Both consequences must survive composition verbatim, and the safehouse
-// explanation must key on APP_SANDBOX_CONTAINER_ID + `listen EPERM` only.
+// explanations must key on APP_SANDBOX_CONTAINER_ID plus the two known
+// failure signatures: mux bind (`listen EPERM`) and the enforcement canary
+// (`sandbox_apply` / `cannot enforce commands` — nested Seatbelt is OS-blocked).
 const EPERM = "listen EPERM: operation not permitted /var/folders/x/T/srt-mux-35759-1.sock";
+const CANARY = "kernel sandbox initialized but cannot enforce commands: sandbox-exec: sandbox_apply: Operation not permitted — nested sandbox profile application is blocked in this environment (see plan-mode AUDIT.md \"Safehouse coexistence\")";
 const safehouseMarker = process.env.APP_SANDBOX_CONTAINER_ID;
 const E_FLAG = "APP_SANDBOX_CONTAINER_ID";
 process.env[E_FLAG] = "agent-safehouse";
@@ -34,16 +37,24 @@ process.env[E_FLAG] = "agent-safehouse";
 	const plan = composeSandboxInitFailure(EPERM, false);
 	check("safehouse: plan consequence kept", plan.endsWith("Plan mode degrades to the regex guardrail."));
 	check("safehouse: raw error kept", plan.includes(EPERM));
-	check("safehouse: explains the mux-unable-to-listen cause", plan.includes("denies Unix-socket binds"));
-	check("safehouse: points at the fix file", plan.includes("srt-mux-pi.sb"));
+	check("safehouse: explains the mux-unable-to-listen cause", plan.includes("denies the Unix-socket binds the sandbox mux needs"));
 	check("safehouse: marked expected", /expected inside agent-safehouse/.test(plan));
+	check("safehouse: points at the README section", plan.includes('"Agent Safehouse (macOS wrapper)"'));
 	const gap = composeSandboxInitFailure(EPERM, true);
 	check("safehouse: airgap fail-closed kept", gap.includes("Airgap FAILS CLOSED: bash commands will be blocked until the sandbox initializes."));
+
+	const canaryPlan = composeSandboxInitFailure(CANARY, false);
+	check("canary: plan consequence kept", canaryPlan.endsWith("Plan mode degrades to the regex guardrail."));
+	check("canary: explains nested-Seatbelt block", canaryPlan.includes("the OS blocks applying a nested Seatbelt profile"));
+	check("canary: raw error kept", canaryPlan.includes("sandbox_apply: Operation not permitted"));
+	check("canary: marked expected", /expected inside agent-safehouse/.test(canaryPlan));
+	const canaryGap = composeSandboxInitFailure(CANARY, true);
+	check("canary: airgap fail-closed kept", canaryGap.includes("Airgap FAILS CLOSED: bash commands will be blocked until the sandbox initializes."));
 }
 process.env[E_FLAG] = "some-other-wrapper";
-check("non-safehouse container id still explains (marker alone is not the test — EPERM is)",
-	composeSandboxInitFailure(EPERM, false).includes("denies Unix-socket binds"));
-check("non-EPERM failure not blamed on safehouse",
+check("any container id + known signature still explains",
+	composeSandboxInitFailure(EPERM, false).includes("agent-safehouse"));
+check("non-signature failure not blamed on safehouse",
 	!composeSandboxInitFailure("ECONNREFUSED 127.0.0.1:1", false).includes("agent-safehouse"));
 if (safehouseMarker === undefined) {
 	delete process.env[E_FLAG];

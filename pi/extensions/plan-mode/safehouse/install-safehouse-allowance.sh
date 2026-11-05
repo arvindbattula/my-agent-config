@@ -50,6 +50,16 @@ cat <<'WIRING'
 
 WIRING — pick the case that matches what the detection above shows:
 
+  ⚠️ DO NOT wire --append-profile into pi's launch yet ⚠️
+  Verification found a SECOND wall: applying a nested Seatbelt profile from
+  inside agent-safehouse is blocked by the OS (`sandbox-exec: sandbox_apply:
+  Operation not permitted`, exit 71). With ONLY the socket allowance wired,
+  the sandbox initializes and then EVERY wrapped plan/airgap bash command
+  fails. Keep this file installed for the probes, and wait for the
+  nesting experiment + the enforcement canary on feat/plan-mode-safehouse
+  before wiring it into pi(). (The plan-mode extension ≥ 2026-11-05 runs a
+  post-init canary that degrades gracefully even if you do.)
+
   Case A: an alias/function in a shell rc file, e.g. `alias pi='safehouse --workdir ... pi'`
     -> add the flag to it:
        alias pi='safehouse --append-profile="$HOME/.config/safehouse/append/srt-mux-pi.sb" --workdir ... -- pi'

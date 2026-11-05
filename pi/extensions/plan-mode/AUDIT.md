@@ -1001,3 +1001,32 @@ socket pattern if that ever changes). Verification runs from Terminal per
 `verify-safehouse-fix.sh`; pending that, docs/state.md's "unix-socket binds"
 durable fact still stands for unaugmented safehouse sessions.
 
+### Second wall: nested Seatbelt is OS-blocked (found 2026-11-05 during verification)
+
+With `srt-mux-pi.sb` active, `SandboxManager.initialize` SUCCEEDS (S-00/S-10
+pass) but every wrapped command fails: the children run
+`env … /usr/bin/sandbox-exec -p <profile> bash -c …`, and **applying a Seatbelt
+profile from inside an existing Seatbelt sandbox is blocked by the OS** —
+reproduced in-session as `sandbox-exec: sandbox_apply: Operation not permitted`,
+exit 71 — and agent-safehouse's own electron.sb documents exactly this as "not
+fixable with additional allow rules". Pending the bare-Terminal nesting
+experiment (outer `(allow default)` wrapper): if it confirms the OS block, the
+kernel layer can never enforce under safehouse and `srt-mux-pi.sb` must NOT be
+wired into pi's launch — init would report ready while every wrapped command
+bricks. If instead it is policy-gated, an additional allow rule in the same
+append-profile restores enforcement.
+
+**Enforcement canary (added 2026-11-05, branch `feat/plan-mode-safehouse`):**
+`ensureSandbox(config, key, verifyCwd)` now runs one wrapped `true` through the
+production bash ops after a successful init (~100-200ms, once per mode entry/
+policy switch). On failure the sandbox is torn down and the mode degrades
+EXACTLY like an init failure — instead of bricking all plan/airgap bash. This
+also covers the README's Linux blocked-namespaces state ("sandbox reports
+ready, then every bash command fails"). The canary failure flows through
+`sandboxInitError()` → `composeSandboxInitFailure()`, which explains the
+`sandbox_apply` signature as the safehouse nesting block. The canary runs
+BEFORE `policyKey` is set, so `isSandboxReady()` stays false and bash passes
+through unsandboxed (regex guardrail active). Tests: 23 checks in
+`sandbox-init-failure.mjs` (compose signature matrix incl. the canary message);
+corpus gate 127/127.
+

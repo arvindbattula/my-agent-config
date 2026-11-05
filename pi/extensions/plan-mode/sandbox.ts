@@ -68,8 +68,16 @@ export function isSandboxPlatformSupported(): boolean {
 	return process.platform === "darwin" || process.platform === "linux";
 }
 
-/** Initialize (or switch) the sandbox policy. Returns success. */
-export async function ensureSandbox(config: SandboxRuntimeConfig, key: string): Promise<boolean> {
+/** Initialize (or switch) the sandbox policy. Returns success. When
+ * `verifyCwd` is provided, a post-init enforcement canary verifies that a
+ * wrapped command can actually run before declaring the sandbox ready
+ * (see `sandboxEnforceCanary` below).
+ */
+export async function ensureSandbox(
+	config: SandboxRuntimeConfig,
+	key: string,
+	verifyCwd?: string,
+): Promise<boolean> {
 	if (policyKey === key && initError === null) return true;
 	try {
 		if (policyKey !== null) {
@@ -80,6 +88,29 @@ export async function ensureSandbox(config: SandboxRuntimeConfig, key: string): 
 			}
 		}
 		await SandboxManager.initialize(config);
+		// Post-init enforcement canary (2026-11-05): "ready" must mean a
+		// wrapped command can run, not just that the mux could listen. Two
+		// documented states report a healthy init while every wrapped command
+		// then fails, which bricks ALL plan/airgap bash instead of degrading:
+		//   - macOS nested Seatbelt (agent-safehouse): the wrapped child runs
+		//     `sandbox-exec -p <profile>`, and applying a profile from inside
+		//     a Seatbelt sandbox is OS-blocked: "sandbox_apply: Operation not
+		//     permitted", exit 71. NOT fixable with additional allow rules.
+		//   - Linux blocked namespaces: init succeeds, every exec fails with
+		//     a `bwrap:` error (README "Blocked namespaces look different from
+		//     missing binaries").
+		// The canary runs the exact production enforcement path with `true`
+		// once per init (~100-200ms); on failure the sandbox is torn down
+		// and this degrades identically to an init failure.
+		if (verifyCwd !== undefined && existsSync(verifyCwd)) {
+			const canary = await sandboxEnforceCanary(verifyCwd);
+			if (canary !== true) {
+				await teardownToError(
+					`kernel sandbox initialized but cannot enforce commands: ${canary} — nested sandbox profile application is blocked in this environment (see plan-mode AUDIT.md "Safehouse coexistence")`,
+				);
+				return false;
+			}
+		}
 		policyKey = key;
 		initError = null;
 		return true;
@@ -87,6 +118,37 @@ export async function ensureSandbox(config: SandboxRuntimeConfig, key: string): 
 		policyKey = null;
 		initError = describeSandboxInitFailure(e instanceof Error ? e.message : String(e));
 		return false;
+	}
+}
+
+/** Shared failure path for a sandbox that initialized but cannot enforce. */
+async function teardownToError(message: string): Promise<void> {
+	policyKey = null;
+	initError = message;
+	try {
+		await SandboxManager.reset();
+	} catch {
+		// the sandbox cannot enforce anyway; best-effort cleanup
+	}
+}
+
+/** Run one wrapped `true` through the production bash ops and report
+ * `true` when it exits 0, else the failing output's last line (or the
+ * thrown error text). */
+async function sandboxEnforceCanary(cwd: string): Promise<true | string> {
+	let out = "";
+	try {
+		const ops = createSandboxedBashOps();
+		const res = await ops.exec("true", cwd, {
+			onData: (d) => (out += d.toString()),
+			timeout: 10,
+		});
+		if (res.exitCode === 0) return true;
+		const tail = out.trim().split("\n").pop() ?? "";
+		return tail || `wrapped command exited ${res.exitCode}`;
+	} catch (e) {
+		const reason = e instanceof Error ? e.message : String(e);
+		return reason || "wrapped command could not run";
 	}
 }
 
