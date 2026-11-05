@@ -218,7 +218,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		const denyRead = airgapMode ? AIRGAP_DENY_READ : loadPlanDenyReadConfig(ctx.cwd);
 		const ok = await ensureSandbox(
 			planSandboxConfig(denyRead),
-			airegapMode ? "airgap" : "plan",
+			airgapMode ? "airgap" : "plan",
 			ctx.cwd, // canary cwd: verify a wrapped command can actually run
 		);
 		if (!ok) {

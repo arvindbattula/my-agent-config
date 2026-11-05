@@ -1,0 +1,14 @@
+{
+	"compilerOptions": {
+		"target": "esnext",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"noEmit": true,
+		"skipLibCheck": true,
+		"strict": false,
+		"noImplicitAny": false,
+		"types": ["node"]
+	},
+	"include": ["index.ts", "sandbox.ts", "utils.ts", "types/**/*.d.ts"]
+}
