@@ -32,7 +32,7 @@ import {
 	sandboxInitError,
 	teardownSandbox,
 } from "./sandbox.ts";
-import { airgapBlockReason, blockReason, checkHash, endsTurnAfterBlock, extractTodoItems, loadPlanModeConfig, markCompletedSteps, shouldSuggestPlan, type TodoItem } from "./utils.ts";
+import { airgapBlockReason, blockReason, checkHash, composeSandboxInitFailure, endsTurnAfterBlock, extractTodoItems, loadPlanModeConfig, markCompletedSteps, shouldSuggestPlan, type TodoItem } from "./utils.ts";
 
 /** Tool name for the step-completion tool, also used in active-tool management. */
 const PLAN_STEP_DONE_TOOL = "plan_step_done";
@@ -187,6 +187,16 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	const localCwd = process.cwd();
 	const localBash = createBashTool(localCwd);
 
+	// UX hardening (2026-11-05 — see AUDIT.md "Warn-once, safehouse-aware
+	// sandbox-init notifications"): notify a kernel-init failure ONCE per
+	// distinct message instead of on every mode entry / resume. Under
+	// agent-safehouse the failure is deterministic; the old every-entry toast
+	// was noise that hid the actual state. Keyed by the composed message so
+	// a genuinely NEW failure still notifies, and a successful init re-arms.
+	// The --no-plan-sandbox and unsupported-platform branches are deliberate,
+	// explicit states and stay un-deduped.
+	let lastSandboxInitFailureToast: string | null = null;
+
 	/** Initialize/switch the sandbox policy for the current mode. Called on
 	 * mode entry, mode switch, and session resume — never in normal mode. */
 	async function activateSandboxForMode(ctx: ExtensionContext): Promise<void> {
@@ -206,15 +216,19 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			return;
 		}
 		const denyRead = airgapMode ? AIRGAP_DENY_READ : loadPlanDenyReadConfig(ctx.cwd);
-		const ok = await ensureSandbox(planSandboxConfig(denyRead), airgapMode ? "airgap" : "plan");
+		const ok = await ensureSandbox(
+			planSandboxConfig(denyRead),
+			airegapMode ? "airgap" : "plan",
+			ctx.cwd, // canary cwd: verify a wrapped command can actually run
+		);
 		if (!ok) {
-			ctx.ui.notify(
-				`Kernel sandbox init failed: ${sandboxInitError()}. ` +
-					(airgapMode
-						? "Airgap FAILS CLOSED: bash commands will be blocked until the sandbox initializes."
-						: "Plan mode degrades to the regex guardrail."),
-					airgapMode ? "error" : "warning",
-			);
+			const message = composeSandboxInitFailure(sandboxInitError() ?? "unknown error", airgapMode);
+			if (message !== lastSandboxInitFailureToast) {
+				ctx.ui.notify(message, airgapMode ? "error" : "warning");
+				lastSandboxInitFailureToast = message;
+			}
+		} else {
+			lastSandboxInitFailureToast = null; // a successful init re-arms the notify
 		}
 		updateStatus(ctx);
 	}

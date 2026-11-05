@@ -77,6 +77,22 @@ sudo pacman -S bubblewrap socat ripgrep         # Arch
 - **Blocked namespaces look different from missing binaries:** the sandbox still reports ready, then every bash command fails with a `bwrap:` error, including in plan mode (no allowlist fallback). Nothing runs unsandboxed.
 - Confirm with `node tests/run.mjs --sandbox` from this directory. If bubblewrap cannot start, the denial probes report FAIL as "not run". Probes that can't prove anything on this machine, such as reading a `~/.aws/config` that doesn't exist, report SKIP.
 
+#### Agent Safehouse (macOS wrapper)
+
+If you launch pi inside [agent-safehouse](https://agent-safehouse.dev) (the Seatbelt wrapper; detected by `APP_SANDBOX_CONTAINER_ID`), the kernel layer **cannot run there — an OS limitation, not a config problem**. Two independent walls:
+
+1. **Mux bind wall (policy):** safehouse's deny-by-default policy allows no Unix-socket binds, so every plan/airgap init fails with `listen EPERM …/srt-mux-<pid>-<seq>.sock` (seq = per-process init-attempt counter) and the warning appears — once per process, explained (see AUDIT.md "Warn-once, safehouse-aware notifications"). Plan mode then runs on the regex guardrail; **airgap fails closed (all bash blocked)**.
+2. **Nesting wall (OS-level, unfixable):** even with the mux socket allowed (`safehouse/srt-mux-pi.sb` restores the bind/connect), macOS blocks applying a nested Seatbelt profile from inside an existing sandbox — `sandbox-exec: sandbox_apply: Operation not permitted`, exit 71 — verified under an outer `(allow default)` profile (2026-11-05), matching agent-safehouse's own electron.sb note ("not fixable with additional allow rules"). Wrapped children can therefore never run their profiles inside safehouse, so **the kernel layer can never enforce there**.
+
+**Consequently: do NOT wire `--append-profile` into pi's safehouse launch.** `safehouse/srt-mux-pi.sb` is kept as the traced investigation artifact (it restores socket init only, never enforcement); the post-init enforcement canary in `sandbox.ts` degrades gracefully if anyone wires it anyway. The full diagnosis is in AUDIT.md ("Safehouse coexistence"); `safehouse/verify-safehouse-fix.sh` reproduces both walls and the collateral checks (run it from a normal Terminal):
+
+```bash
+# from a normal Terminal (not inside a sandboxed session):
+bash safehouse/install-safehouse-allowance.sh     # installs + validates + smoke-tests the socket rules
+bash safehouse/verify-safehouse-fix.sh             # reproduces both walls; labels the OS-block outcome
+```
+
+
 ### Plan Mode (Read-Only)
 - Built-in `edit`/`write` disabled; other active tools (read, bash, grep, find, ls, questionnaire, memory tools) remain available
 - Bash commands filtered through the allowlist AND executed in the kernel sandbox

@@ -394,6 +394,43 @@ export function describeSandboxInitFailure(message: string): string {
 	return `${message} — install bubblewrap, socat and ripgrep (plan-mode README, "Linux prerequisites")`;
 }
 
+/**
+ * Composes the sandbox-init-failure toast. Two UX hardenings over the raw
+ * error (added 2026-11-05 — see AUDIT.md "Warn-once, safehouse-aware init
+ * failure notifications"):
+ *
+ *  1. When running inside agent-safehouse (detected via the
+ *     APP_SANDBOX_CONTAINER_ID marker), the two known failure signatures get
+ *     a cause + pointer to the README's "Agent Safehouse (macOS wrapper)"
+ *     section:
+ *       - sandbox_apply / cannot-enforce (2026-11-05 canary) — the OS
+ *         blocks applying a nested Seatbelt profile from inside the
+ *         existing safehouse sandbox, so the kernel layer can never
+ *         enforce commands there. The srt-mux socket allowance alone must
+ *         NOT be wired in this state without the enforcement canary: init
+ *         would report ready while every wrapped command bricks.
+ *       - listen EPERM — the composed policy denies the Unix-socket binds
+ *         the sandbox mux needs.
+ *  2. The airgap/plan consequence sentence is preserved verbatim (airgap
+ *     fails closed; plan degrades to the regex guardrail).
+ */
+export function composeSandboxInitFailure(message: string, airgap: boolean): string {
+	const inSafehouse = process.env.APP_SANDBOX_CONTAINER_ID !== undefined;
+	let detail = message;
+	if (inSafehouse && /sandbox_apply|cannot enforce commands/.test(message)) {
+		detail +=
+			" — expected inside agent-safehouse: the OS blocks applying a nested Seatbelt profile from inside it, so the kernel layer cannot enforce commands in this sandbox (plan-mode README, \"Agent Safehouse (macOS wrapper)\")";
+	} else if (inSafehouse && /listen EPERM/.test(message)) {
+		detail +=
+			" — expected inside agent-safehouse (its Seatbelt policy denies the Unix-socket binds the sandbox mux needs; plan-mode README, \"Agent Safehouse (macOS wrapper)\")";
+	}
+	return `Kernel sandbox init failed: ${detail}. ${
+		airgap
+			? "Airgap FAILS CLOSED: bash commands will be blocked until the sandbox initializes."
+			: "Plan mode degrades to the regex guardrail."
+	}`;
+}
+
 /** Project-local plan-mode config: `.pi/plan-mode.json` (all optional). */
 export interface PlanModeConfig {
 	/** Harness-verified step completion (Phase 3). Default: true. */

@@ -952,3 +952,89 @@ reproduces it. The same shells cannot write `~/.azure` (the `az` CLI throws
 `azure-reasoning-effort.test.mjs` FAIL from inside any agent session even when
 everything is fine. Always run them from a normal terminal; a failure from inside a
 session proves nothing.
+
+## Safehouse coexistence: srt-mux allowance + warn-once notifications (2026-11-05)
+
+**Root cause (diagnosed 2026-11-05, 100% confidence; see project memory):** the gotcha
+above is agent-safehouse's deny-by-default Seatbelt policy — it allows zero
+Unix-socket binds (verified in the composed 0.12.0 policy dump: the only bind allow
+is `(allow network-bind (local ip))`). The extension's kernel layer therefore NEVER
+initializes under safehouse — deterministically, on every /plan entry, not
+intermittently. The socket's seq suffix (`srt-mux-<pid>-<seq>`; module-level counter,
+never reset) is the per-process init-attempt counter, which is why the second entry
+shows `-1.sock`.
+
+**Fix A — safehouse allowance (this session):** `safehouse/srt-mux-pi.sb` grants
+bind+inbound and outbound for the mux socket's exact path shape in the per-user
+TMPDIR (BOTH rules required: the mux front-end `connect()`s its own unix backend —
+mux-proxy.js dispatchHttp — which is a `network-outbound` filter safehouse also
+denies by default). Installer + probe + verification matrix:
+`safehouse/install-safehouse-allowance.sh`, `verify-safehouse-fix.sh`. Originally
+designed to be wired into pi's safehouse launch via `--append-profile` — REVERSED
+by the nesting verdict below (see "Second wall"): the allowance restores socket
+init only, never enforcement. No extension change can substitute for the bind
+wall: the pinned `@anthropic-ai/sandbox-runtime@0.0.81` uses a TCP backend only
+on Windows (`httpBackendPortRange`), and no TMPDIR relocation helps since
+safehouse denies unix binds on every path.
+
+**Fix B — extension UX hardening (deliberate divergence, upstream example does NOT
+have this):**
+- `utils.ts composeSandboxInitFailure()` annotates `listen EPERM` failures inside
+  agent-safehouse (detected via `APP_SANDBOX_CONTAINER_ID`) as expected, points at
+  `safehouse/srt-mux-pi.sb`, and keeps the airgap fail-closed / plan-degrades
+  consequence sentences verbatim.
+- `index.ts activateSandboxForMode` now notifies ONCE per distinct failure message
+  per process (`lastSandboxInitFailureToast`, keyed by the composed message; a
+  successful init re-arms it). Rationale: the failure is deterministic under an
+  unbudging sandbox policy; the old every-entry toast was noise. The
+  `--no-plan-sandbox` and unsupported-platform branches stay un-deduped (explicit
+  deliberate states).
+- `tests/sandbox-init-failure.mjs` extended: 23 checks (was 11), covering compose
+  semantics in both safehouse and bare contexts incl. the canary signature
+  matrix. Corpus gate still 127/127.
+
+**Not done (deferred per existing trigger policy):** a statusline segment showing
+`plan (kernel)` vs `plan (regex)`. Trigger: you find yourself unsure which guardrail
+layer is active mid-session. (The no-warning/`Airgap FAILS CLOSED`-absence toasts
+now carry that signal.)
+
+**Owner decisions (2026-11-05):** local-only fix, no upstream PR to agent-safehouse
+(for now; the allowance matches their own codex-app.sb/vscode-app.sb per-tool
+socket pattern if that ever changes). Verification runs from Terminal per
+`verify-safehouse-fix.sh`; pending that, docs/state.md's "unix-socket binds"
+durable fact still stands for unaugmented safehouse sessions.
+
+### Second wall: nested Seatbelt is OS-blocked (found 2026-11-05 during verification)
+
+With `srt-mux-pi.sb` active, `SandboxManager.initialize` SUCCEEDS (S-00/S-10
+pass) but every wrapped command fails: the children run
+`env … /usr/bin/sandbox-exec -p <profile> bash -c …`, and **applying a Seatbelt
+profile from inside an existing Seatbelt sandbox is blocked by the OS** —
+reproduced in-session as `sandbox-exec: sandbox_apply: Operation not permitted`,
+exit 71 — and agent-safehouse's own electron.sb documents exactly this as "not
+fixable with additional allow rules".
+
+**VERDICT (confirmed 2026-11-05, bare-Terminal experiment):** wrapping the inner
+sandbox-exec in an outer `(allow default)` profile — the most permissive Seatbelt
+can express — STILL fails with `sandbox_apply: Operation not permitted`, exit 71.
+The nesting block is OS-level, not policy-gated; **no allow rule can lift it, and
+the kernel layer can never enforce commands inside agent-safehouse.**
+`srt-mux-pi.sb` therefore stays unwired (kept as the traced investigation artifact
+for socket-init-only needs, e.g. probes); inside safehouse, plan mode runs on the
+regex guardrail (warn-once + explained) and airgap stays fail-closed. The
+enforcement canary below makes the would-be brick degrade gracefully instead.
+
+**Enforcement canary (added 2026-11-05, branch `feat/plan-mode-safehouse`):**
+`ensureSandbox(config, key, verifyCwd)` now runs one wrapped `true` through the
+production bash ops after a successful init (~100-200ms, once per mode entry/
+policy switch). On failure the sandbox is torn down and the mode degrades
+EXACTLY like an init failure — instead of bricking all plan/airgap bash. This
+also covers the README's Linux blocked-namespaces state ("sandbox reports
+ready, then every bash command fails"). The canary failure flows through
+`sandboxInitError()` → `composeSandboxInitFailure()`, which explains the
+`sandbox_apply` signature as the safehouse nesting block. The canary runs
+BEFORE `policyKey` is set, so `isSandboxReady()` stays false and bash passes
+through unsandboxed (regex guardrail active). Tests: 23 checks in
+`sandbox-init-failure.mjs` (compose signature matrix incl. the canary message);
+corpus gate 127/127.
+
