@@ -37,6 +37,7 @@ The engineering workflow (`/idea-refine` → `/scaffold` → `/discover` → `/b
 - No bypass: the repo-admin bypass actor was removed (2026-10-22); direct pushes are rejected server-side
 - `.github/workflows/protect-main.yml` — flags direct pushes by creating an issue
 - `.github/workflows/close-external-prs.yml` — auto-closes PRs from non-collaborators
+- Agents prepare PRs; **merging is the owner's action** — never merge, revert, or delete merged branches autonomously (`/ship` is the owner's phase; `rules/ask-dont-assume.md`)
 
 ## Verification
 
