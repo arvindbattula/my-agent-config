@@ -134,8 +134,8 @@ The Pi CLI defaults to the **Valar provider, `zai-org/GLM-5.3`** (`pi/settings.j
 
 Key extensions (all synced to `~/.pi/agent/extensions/` by `install.sh`; per-extension detail in `pi/extensions/README.md`):
 
-- `valar-completion-window.ts` — injects the completion window on every Valar request, and registers the **`/valar`** command: interactive picker (window + thinking level) or direct args — `/valar <window> [level]` (e.g. `/valar priority high`); `now`→asap, `none`→off aliases; session-only, new sessions default to `standard` (ADR-011)
-- `plan-mode/` — verified plan execution (harness-checked `[Verify:]` steps, kernel sandbox on macOS/Linux; under agent-safehouse it degrades to the regex guardrail with one explained warning, ADR-012)
+- `valar-completion-window.ts` — injects the completion window on every Valar request, and registers the **`/valar`** command: interactive picker (window + thinking level) or direct args — `/valar <window> [level]` (e.g. `/valar priority high`); `now`→asap, `none`→off aliases; session-only, new sessions default to `standard` (ADR-013)
+- `plan-mode/` — verified plan execution (harness-checked `[Verify:]` steps, kernel sandbox on macOS/Linux; under agent-safehouse it degrades to the regex guardrail with one explained warning, ADR-011)
 - `questionnaire.ts` — the multi-tab select tool plan mode relies on
 - `statusline.ts` — two-line footer (above)
 - `azure-*.ts` — Azure Foundry / OpenAI provider extensions with their own retry loop
