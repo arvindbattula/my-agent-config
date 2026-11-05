@@ -180,6 +180,16 @@ The pi 1.4.0 update migrated pi from an npm global install to the managed instal
 
 **Decision:** Valar uses `retry.provider.maxRetries: 2` instead. Pi passes it to its built-in transports, and Valar uses the built-in `openai-completions` transport. The Azure extensions don't read `options.maxRetries`, so they aren't affected.
 
+### Valar completion window at the request level
+
+Valar bills every request on a completion window. Omitted, a request runs on the **Now** window — the most expensive tier (GLM-5.3: input $1.12 / output $3.52 per 1M tokens vs $0.56 / $1.76 on `standard`), while `pi/models.json` cost fields are mapped to the **standard** tier — so the UI undercounted real spend ~2x. Pi's built-in transports have no way to send request metadata, and Valar's Responses API (`/v1/responses`) rejects `stream: true`, so migrating the transport would not work for an interactive CLI. Valar's Chat Completions API instead accepts `metadata` on the body, including `completion_window`.
+
+**Decision:** `valar-completion-window.ts` (repo extension; this repo — not the gitignored `valar-strip-reasoning.ts` shim) merges `metadata.completion_window` into every outbound Valar chat-completions payload via the official `before_provider_request` hook. Default window `standard` (the tier `models.json` pricing assumes); override per session with `VALAR_COMPLETION_WINDOW=asap|priority|standard`. `flex` and unknown values are refused with a console warning (flex is background-only — Valar rejects it on synchronous/streaming requests; unknown values fall back to Valar's default Now tier so a typo is visible, not silently overridden). Existing `metadata` keys are preserved — merge, never overwrite. Scoped to the `valar` provider only; non-Valar and non-chat-shaped payloads pass through untouched.
+
+Verified live (2026-11-06): `metadata.completion_window` is accepted on both non-streaming and streaming (SSE + `include_usage`) requests per `node pi/extensions/verify-valar-window.mjs` (offline logic tests + live acceptance probes). All 21 priced models in Valar's catalog support every window; `valar-auto-balanced` is unpriced. Stays on the `openai-completions` transport, so ADR-009's provider-level retry wiring is unaffected.
+
+Caveat: when overriding away from `standard`, the billing tier changes but `models.json` cost display does not — `/stats` and the footer approximate standard rates. See ADR-010 in `docs/decisions.md`.
+
 Tested with a mock provider on Pi 1.4.0: one 503 is retried and succeeds, a 429 honours `Retry-After`, a 400 isn't retried, and a persistent 503 stops after 3 attempts. It covers failed requests, not a stream that dies partway. Feynman has its own settings and isn't covered.
 
 ### azure-openai-models.ts does not inherit tool-call-ID hardening
