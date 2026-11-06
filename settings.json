@@ -104,6 +104,14 @@
     ]
   },
   "model": "opus",
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "medium"
+    },
+    "claude-sonnet-5-5": {
+      "effortLevel": "medium"
+    }
+  },
   "permissions": {
     "allow": [
       "Bash(node:*)",
@@ -116,6 +124,7 @@
     ]
   },
   "skipAutoPermissionPrompt": true,
+  "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "statusLine": {
     "command": "~/.claude/statusline.sh",
