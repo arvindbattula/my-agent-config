@@ -68,10 +68,13 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | `session-stats.test.mjs` | — | `computeSessionTotals` cost/token totals parity with pi's `getUsageCostBreakdown`; `formatTokens`/`sanitizeStatusText` |
 | `statusline.test.mjs` | 5 | `render()` does not crash when ExtensionAPI lacks `getSettings()` (feynman's bundled pi 0.84.x); ` (auto)` marker honors `compaction.enabled` when present. Uses `statusline-test-hook.mjs` to alias `@earendil-works/pi-tui` |
 | `questionnaire.test.mjs` | 6 | The real question UI: answer, cancel and the non-interactive error; plan mode's tool lists; the copy still matches Pi's example |
+| `plan-mode` (`npm run check`) | — | `tsc --noEmit` typecheck (tsconfig + SDK stubs); also runs in CI on PRs touching plan-mode (ADR-014) |
 | `plan-mode/tests/run.mjs` | — | Red-team corpus gate for the bash allowlist. `--sandbox` runs the kernel probes |
 | `plan-mode/tests/phase3.mjs` | — | Verified step completion: check extraction, hashing and config |
 | `plan-mode/tests/phase4.mjs` | — | Trigger-assist hit and abstain cases |
 | `plan-mode/tests/sandbox-init-failure.mjs` | — | Sandbox startup failures name the packages to install |
+| `verify-azure-openai-models.mjs` | — | Regression: `azure-openai-models.ts` loads under feynman's bundled 0.84.x extension loader (subpath-import aliasing bug, 2026-11-04) |
+| `ts-resolve-hook.mjs` | — | Test-only ESM resolve hook: appends `.ts` for the extensionless relative imports the tests use; resolution only, no TS transform |
 
 ### `plan-mode/`
 Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details. Depends on `@anthropic-ai/sandbox-runtime`, which `install.sh` installs with `npm ci`. Linux also needs the prerequisites in that README for the kernel sandbox.

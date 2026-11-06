@@ -59,6 +59,10 @@ While plan or airgap mode is active, **every bash command runs inside an OS-leve
 
 `./install.sh` installs it with `npm ci`, and `--status` reports when it is missing. To run the tests from a repo checkout, also run `npm ci` in this directory.
 
+#### Typecheck (required before pushing extension changes)
+
+`npm run check` runs `tsc --noEmit` over the extension. Pi transpiles extension TS without type-checking, so undeclared-identifier bugs (e.g. the `airegapMode` ReferenceError that broke `/plan`, #90) otherwise surface only at runtime. `tsconfig.json` + `types/pi-sdk-stubs.d.ts` (ambient stubs for the pi SDK modules, which aren't npm-resolvable from this repo) make the check self-contained. CI runs the same check on PRs touching `pi/extensions/plan-mode/` (`.github/workflows/plan-mode-check.yml`, ADR-014).
+
 Without the dependency, `pi` exits with `Cannot find module '@anthropic-ai/sandbox-runtime'`, even when no planning mode was requested. `pi -ne` starts without extensions, and therefore without plan mode or airgap.
 
 #### Linux prerequisites
