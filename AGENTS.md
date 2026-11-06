@@ -23,7 +23,7 @@ Personal agent configuration — skills, commands, rules, and settings, synced a
 | `rules-personal/` | local only | machine-local rule staging; gitignored, not committed |
 | `hooks/` | Claude Code | session lifecycle: session-start, compress-memory, design-antipattern-check, design-antipattern-prevent (PreToolUse guard), protect-paths, command-policy, stop-gate (with stop_hook_active safety), session-end; plus `design-checks-lib.sh` (shared checks) and `hooks.test.sh` (tests) |
 | `bin/` | Claude Code | helper scripts (e.g. `recall`) |
-| `pi/extensions/` | pi | auto-discovered from `~/.pi/agent/extensions`; includes lifecycle-guards (Pi port of Claude Code hooks); plan-mode has an npm dependency, which `install.sh` installs |
+| `pi/extensions/` | pi | auto-discovered from `~/.pi/agent/extensions`; includes lifecycle-guards (Pi port of Claude Code hooks); plan-mode has an npm dependency, which `install.sh` installs — run `npm run check` (tsc typecheck) in `pi/extensions/plan-mode` before pushing changes to it |
 | `pi/settings.json`, `pi/models.json` | pi | default model and model catalog; `--force` overwrites the live copies |
 | `settings.json` | Claude Code | permissions, plugins, preferences |
 | `statusline.sh` | Claude Code | terminal status bar (context usage, git info) |

@@ -68,6 +68,7 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | `session-stats.test.mjs` | — | `computeSessionTotals` cost/token totals parity with pi's `getUsageCostBreakdown`; `formatTokens`/`sanitizeStatusText` |
 | `statusline.test.mjs` | 5 | `render()` does not crash when ExtensionAPI lacks `getSettings()` (feynman's bundled pi 0.84.x); ` (auto)` marker honors `compaction.enabled` when present. Uses `statusline-test-hook.mjs` to alias `@earendil-works/pi-tui` |
 | `questionnaire.test.mjs` | 6 | The real question UI: answer, cancel and the non-interactive error; plan mode's tool lists; the copy still matches Pi's example |
+| `plan-mode` (`npm run check`) | — | `tsc --noEmit` typecheck (tsconfig + SDK stubs); also runs in CI on PRs touching plan-mode (ADR-014) |
 | `plan-mode/tests/run.mjs` | — | Red-team corpus gate for the bash allowlist. `--sandbox` runs the kernel probes |
 | `plan-mode/tests/phase3.mjs` | — | Verified step completion: check extraction, hashing and config |
 | `plan-mode/tests/phase4.mjs` | — | Trigger-assist hit and abstain cases |
