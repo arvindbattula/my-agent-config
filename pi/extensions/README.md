@@ -73,6 +73,8 @@ Lifecycle guards extension that ports the Claude Code bash hooks to Pi's extensi
 | `plan-mode/tests/phase3.mjs` | — | Verified step completion: check extraction, hashing and config |
 | `plan-mode/tests/phase4.mjs` | — | Trigger-assist hit and abstain cases |
 | `plan-mode/tests/sandbox-init-failure.mjs` | — | Sandbox startup failures name the packages to install |
+| `verify-azure-openai-models.mjs` | — | Regression: `azure-openai-models.ts` loads under feynman's bundled 0.84.x extension loader (subpath-import aliasing bug, 2026-11-04) |
+| `ts-resolve-hook.mjs` | — | Test-only ESM resolve hook: appends `.ts` for the extensionless relative imports the tests use; resolution only, no TS transform |
 
 ### `plan-mode/`
 Read-only exploration mode with plan tracking, step completion, and post-compaction auto-resume. See `plan-mode/README.md` for full details. Depends on `@anthropic-ai/sandbox-runtime`, which `install.sh` installs with `npm ci`. Linux also needs the prerequisites in that README for the kernel sandbox.

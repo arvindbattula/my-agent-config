@@ -18,7 +18,7 @@ Personal Claude Code configuration — skills, commands, rules, and settings, sy
 - `rules/` — Always-on behavioral guidelines (24 rules)
 - `hooks/` — Session lifecycle hooks (session-start, compress-memory, design-antipattern-check, design-antipattern-prevent, protect-paths, command-policy, stop-gate, session-end), plus `design-checks-lib.sh` (shared checks) and `hooks.test.sh` (tests)
 - `bin/` — Helper scripts (e.g. `recall`)
-- `pi/` — Pi coding agent config: `extensions/`, `models.json`, `settings.json`
+- `pi/` — Pi coding agent config: `extensions/`, `models.json`, `settings.json`. plan-mode is typechecked (`npm run check` in `pi/extensions/plan-mode`), gated by CI on PRs (ADR-014)
 - `settings.json` — Permissions, plugins, preferences
 - `statusline.sh` — Terminal status bar (context usage, git info)
 
