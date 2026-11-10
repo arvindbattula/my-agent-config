@@ -1038,3 +1038,59 @@ through unsandboxed (regex guardrail active). Tests: 23 checks in
 `sandbox-init-failure.mjs` (compose signature matrix incl. the canary message);
 corpus gate 127/127.
 
+
+## Pi 1.5.1 + 1.5.2 update: compatibility audited, no action (2026-11-10)
+
+Full release-vs-repo audit (every changelog item checked against our actual surface:
+settings, models.json, all extensions, plan-mode internals, MCP config, known pain
+history). **Verdict: zero code changes required; both 1.5.1 breaking changes are
+provably unreachable for us.**
+
+- **OpenAI-compat `tools: []` omission** (fires only when ALL tools are disabled in
+  a session that used tools): cannot fire here — plan mode removes only `edit`/`write`
+  and always unions in the six baseline tools; airgap uses a fixed non-empty list;
+  nothing else we run disables tools. `compat.requiresToolsWithToolHistory` in
+  `models.json` is the documented escape hatch if Valar ever rejects it — noted,
+  not wired.
+- **`GrepOperations.readFile` deprecation** (context lines now from ripgrep): no
+  extension of ours overrides grep. No-op. Related 1.5.1 fixes (grep context OOM,
+  read-tool streaming) are delivered robustness.
+- **`cacheWarming` default streaming→idle:** no-op for us — our valar models declare
+  no cache lifetime, so warming never ran at any default.
+- **Anthropic-side changes** (message threads, Opus 5.5 default, Sonnet temperature
+  fix, strict-tool retry backoff): unused — `auth.json` empty, default model is
+  `zai-org/GLM-5.3` via Valar.
+- **Azure 1.5.1 fixes** (GPT-6 long-context pricing, 1.05M window): apply to pi's
+  built-in azure catalog only. Our azure extensions self-spec DeepSeek/Kimi/Groq.
+- **Default-model moves:** we pin `defaultProvider`/`defaultModel` + a full custom
+  `models.json`; no drift risk.
+- **1.5.1 dropped-stream auto-retry:** complementary to our #82 provider retry
+  (`retry.enabled=false` + `provider.maxRetries=2`); `transient-retry.ts` lives inside
+  the custom Azure extensions' own fetch loops — no stacking. Empirically: owner on
+  1.5.2 with Valar all morning, no request failures.
+- **Verified under 1.5.2 (2026-11-10):** all extensions live in-session; plan-mode
+  `tsc --noEmit` clean; corpus gate 127/127.
+
+**Delivered painkillers for documented pains:** Valar dropped-stream retry (#82's
+pain class), macOS arm64 image-read `zsh: abort` (this machine), grep `glob`
+resolved relative to `path` (agent quality), session fork when the folder is gone
+(mid-session worktree moves), `/tree` thinking-level restore correctness
+(related to ADR-013 `/valar`).
+
+**Known gaps, decided (2026-11-10, owner):**
+
+- **Thinking-block `[DONE:n]` scan:** our `getTextContent` reads text blocks only, so
+  a `[DONE:n]` written only inside thinking is missed. Upstream #7950 fixed this on
+  their marker-based flow; our primary completion is the structured `plan_step_done`
+  tool, so the fallback gap is minimal. **Owner decision: monitor only** — fix if a
+  step-stall symptom ever appears, not before.
+- **Remaining human check:** `/plan` entry has not been exercised under 1.5.2 (last
+  verified 2026-11-05, pre-1.5.1). Run `/plan` in a fresh session and confirm mode
+  entry + a real plan.
+- **Open item:** two 1.5.1 fixes (idle `ctx.shutdown()` honored; reload deferring
+  during a running response) matter only if Feynman drives pi via the RPC/SDK path.
+  Feynman's mechanism unconfirmed — check with the Feynman config when touched next.
+
+**Bookkeeping:** repo `pi/settings.json` `lastChangelogVersion` synced 1.5.0 → 1.5.2
+(this PR — same drift PR #84 cleared for 1.5.0). Extensions dir: our live copies are
+plain copies, no symlinks (the 1.5.1 symlink-dependency fix is N/A for us).
